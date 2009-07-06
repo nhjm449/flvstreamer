@@ -1,7 +1,7 @@
 /*
  *      Copyright (C) 2005-2008 Team XBMC
  *      http://www.xbmc.org
- *      Copyright (C) 2008-2009 Andrej Stepanchuk
+ *      Copyright (C) 2008-2009 Andrej Stepanchuk, The Flvstreamer Team
  *
  *  This Program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -236,9 +236,9 @@ bool CRTMP::Connect(
   return true;
 }
 
-bool CRTMP::GetNextMediaPacket(RTMPPacket &packet)
+int CRTMP::GetNextMediaPacket(RTMPPacket &packet)
 {
-  bool bHasMediaPacket = false;
+  int bHasMediaPacket = 0;
   while (!bHasMediaPacket && IsConnected() && ReadPacket(packet))
   {
     if (!packet.IsReady())
@@ -281,14 +281,14 @@ bool CRTMP::GetNextMediaPacket(RTMPPacket &packet)
         // audio data
         //Log(LOGDEBUG, "%s, received: audio %lu bytes", __FUNCTION__, packet.m_nBodySize);
         HandleAudio(packet);
-        bHasMediaPacket = true;
+        bHasMediaPacket = 1;
         break;
 
       case 0x09:
         // video data
         //Log(LOGDEBUG, "%s, received: video %lu bytes", __FUNCTION__, packet.m_nBodySize);
         HandleVideo(packet);
-        bHasMediaPacket = true;
+        bHasMediaPacket = 1;
         break;
 
       case 0x0F: // flex stream send
@@ -314,14 +314,16 @@ bool CRTMP::GetNextMediaPacket(RTMPPacket &packet)
 
         obj.Dump();*/
 
-	HandleInvoke(packet.m_body+1, packet.m_nBodySize-1);
+        // If we recv Play.Stop then return 2
+	if ( HandleInvoke(packet.m_body+1, packet.m_nBodySize-1) == 1 )
+	  bHasMediaPacket = 2; 
 	break;
       }
       case 0x12:
         // metadata (notify)
         Log(LOGDEBUG, "%s, received: notify %lu bytes", __FUNCTION__, packet.m_nBodySize);
         HandleMetadata(packet.m_body, packet.m_nBodySize);
-        bHasMediaPacket = true;
+        bHasMediaPacket = 1;
         break;
 
       case 0x13:
@@ -333,7 +335,8 @@ bool CRTMP::GetNextMediaPacket(RTMPPacket &packet)
 	Log(LOGDEBUG, "%s, received: invoke %lu bytes", __FUNCTION__, packet.m_nBodySize);
         //LogHex(packet.m_body, packet.m_nBodySize);
 
-	HandleInvoke(packet.m_body, packet.m_nBodySize);
+	if ( HandleInvoke(packet.m_body, packet.m_nBodySize) == 1 )
+	  bHasMediaPacket = 2; 
         break;
 
       case 0x16:
@@ -356,7 +359,7 @@ bool CRTMP::GetNextMediaPacket(RTMPPacket &packet)
 	
         // FLV tag(s)
         //Log(LOGDEBUG, "%s, received: FLV tag(s) %lu bytes", __FUNCTION__, packet.m_nBodySize);
-        bHasMediaPacket = true;
+        bHasMediaPacket = 1;
         break;
       }
       default:
@@ -394,11 +397,13 @@ int CRTMP::ReadN(char *buffer, int n)
   while (n > 0)
   {
     int nBytes = 0;
-// todo, test this code:
-/*
+
     if(m_nBufferSize == 0)
-    	FillBuffer();
-    int nRead = ((n<m_nBufferSize)?n:m_nBufferSize;
+    	if (!FillBuffer()) {
+    	        Close();
+                return 0;
+        }
+    int nRead = ((n<m_nBufferSize)?n:m_nBufferSize);
     if(nRead > 0) {
     	memcpy(ptr, m_pBufferStart, nRead);
 	m_pBufferStart += nRead;
@@ -407,28 +412,15 @@ int CRTMP::ReadN(char *buffer, int n)
 	m_nBytesIn += nRead;
 	if(m_nBytesIn > m_nBytesInSent + (600*1024)) // report every 600K
 		SendBytesReceived();
-    }//*/
+    }
+    
 //again:
-    nBytes = recv(m_socket, ptr, n, 0);
+//    nBytes = recv(m_socket, ptr, n, 0);
 
     //Log(LOGDEBUG, "%s: %d bytes\n", __FUNCTION__, nBytes);
 #ifdef _DEBUG
         fwrite(ptr, 1, nBytes, netstackdump_read);
 #endif
-
-    if(m_bPlaying) {
-        m_nBytesIn += nBytes;
-	if (m_nBytesIn > m_nBytesInSent + (600*1024) ) // report every 600K
-                  SendBytesReceived();
-    }
- 
-    if (nBytes == -1)
-    {
-      Log(LOGERROR, "%s, RTMP recv error %d", __FUNCTION__, GetSockError());
-      //goto again;
-      Close();
-      return false;
-    }
     
     if (nBytes == 0)
     {
@@ -803,12 +795,12 @@ bool CRTMP::SendPing(short nType, unsigned int nObject, unsigned int nTime)
   return SendRTMP(packet);
 }
 
-void CRTMP::HandleInvoke(const char *body, unsigned int nBodySize)
+int CRTMP::HandleInvoke(const char *body, unsigned int nBodySize)
 {
   if (body[0] != 0x02) // make sure it is a string method name we start with
   {
     Log(LOGWARNING, "%s, Sanity failed. no string method in invoke packet", __FUNCTION__);
-    return;
+    return 0;
   }
 
   RTMP_LIB::AMFObject obj;
@@ -816,7 +808,7 @@ void CRTMP::HandleInvoke(const char *body, unsigned int nBodySize)
   if (nRes < 0)
   { 
     Log(LOGERROR, "%s, error decoding invoke packet", __FUNCTION__);
-    return;
+    return 0;
   }
 
   obj.Dump();
@@ -889,12 +881,16 @@ void CRTMP::HandleInvoke(const char *body, unsigned int nBodySize)
     Log(LOGDEBUG, "%s, onStatus: %s", __FUNCTION__, code.c_str() );
     if (code == "NetStream.Failed"
     ||  code == "NetStream.Play.Failed"
-    ||  code == "NetStream.Play.Stop"
     ||  code == "NetStream.Play.StreamNotFound"
     ||  code == "NetConnection.Connect.InvalidApp")
       Close();
 
-    //if (code == "NetStream.Play.Complete")
+    // Return 1 if this is a Play.Complete or Play.Stop
+    if (code == "NetStream.Play.Complete"
+    ||  code == "NetStream.Play.Stop") {
+      Close();
+      return 1;
+    }
 
     /*if(Link.seekTime > 0) {
     	if(code == "NetStream.Seek.Notify") { // seeked successfully, can play now!
@@ -908,6 +904,7 @@ void CRTMP::HandleInvoke(const char *body, unsigned int nBodySize)
   {
 
   }
+  return 0;
 }
 
 //int pnum=0;
@@ -1010,7 +1007,7 @@ void CRTMP::HandlePing(const RTMPPacket &packet)
 bool CRTMP::ReadPacket(RTMPPacket &packet)
 {
   char type;
-  if (ReadN(&type,1) != 1)
+  if (ReadN(&type,1) == 0)
   {
     Log(LOGERROR, "%s, failed to read RTMP packet header", __FUNCTION__);
     return false;
@@ -1362,6 +1359,7 @@ bool CRTMP::FillBuffer()
     {
       Log(LOGDEBUG, "%s, recv returned %d. GetSockError(): %d", __FUNCTION__, nBytes, GetSockError());
       Close();
+//      exit(10);
       return false;
     }
 

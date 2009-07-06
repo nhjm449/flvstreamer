@@ -3,7 +3,7 @@
 /*
  *      Copyright (C) 2005-2008 Team XBMC
  *      http://www.xbmc.org
- *      Copyright (C) 2008-2009 Andrej Stepanchuk
+ *      Copyright (C) 2008-2009 Andrej Stepanchuk, The Flvstreamer Team
  *
  *  This Program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -116,7 +116,7 @@ class CRTMP
       bool IsConnected(); 
       double GetDuration();
 
-      bool GetNextMediaPacket(RTMPPacket &packet);
+      int GetNextMediaPacket(RTMPPacket &packet);
 
       void Close();
 
@@ -153,7 +153,7 @@ class CRTMP
       bool SendSeek(double dTime);
       bool SendBytesReceived();
 
-      void HandleInvoke(const char *body, unsigned int nBodySize);
+      int HandleInvoke(const char *body, unsigned int nBodySize);
       void HandleMetadata(char *body, unsigned int len);
       void HandleChangeChunkSize(const RTMPPacket &packet);
       void HandleAudio(const RTMPPacket &packet);

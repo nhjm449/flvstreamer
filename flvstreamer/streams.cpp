@@ -1,5 +1,5 @@
 /*  HTTP-RTMP Stream Server
- *  Copyright (C) 2009 Andrej Stepanchuk
+ *  Copyright (C) 2009 Andrej Stepanchuk, The Flvstreamer Team
  *
  *  This Program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -899,7 +899,7 @@ int main(int argc, char **argv)
 	int nHttpStreamingPort = 80;				   // port
 
  	LogPrintf("HTTP-RTMP Stream Server %s\n", RTMPDUMP_STREAMS_VERSION);
-	LogPrintf("(c) 2009 Andrej Stepanchuk, license: GPL\n\n");
+	LogPrintf("(c) 2009 Andrej Stepanchuk, The Flvstreamer Team, license: GPL\n\n");
 
 	// init request
 	memset(&defaultRTMPRequest, 0, sizeof(RTMP_REQUEST));

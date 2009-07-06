@@ -1,5 +1,5 @@
 /*  FLVStreamer
- *  Copyright (C) 2009 Andrej Stepanchuk
+ *  Copyright (C) 2009 Andrej Stepanchuk, The Flvstreamer Team
  *
  *  This Program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -38,7 +38,7 @@ int debuglevel = 1;
 
 using namespace RTMP_LIB;
 
-#define RTMPDUMP_VERSION	"v1.8a"
+#define RTMPDUMP_VERSION	"v1.8b"
 
 #define RD_SUCCESS		0
 #define RD_FAILED		1
@@ -123,9 +123,11 @@ int WriteStream(
 	static bool bFoundFlvKeyframe = false;
 
 	uint32_t prevTagSize = 0;
+	int rtnGetNextMediaPacket = 0;
 	RTMPPacket packet;
 
-	if(rtmp->GetNextMediaPacket(packet))
+	rtnGetNextMediaPacket = rtmp->GetNextMediaPacket(packet);
+	if(rtnGetNextMediaPacket)
 	{
 		char *packetBody	= packet.m_body;
 		unsigned int nPacketLen	= packet.m_nBodySize;
@@ -161,7 +163,7 @@ int WriteStream(
 					std::string metastring = metaObj.GetProperty(0).GetString();
 
                                 	if(metastring == "onMetaData") {
-						// comapre
+						// compare
 						if((nMetaHeaderSize != nPacketLen) || 
 						   (memcmp(metaHeader, packetBody, nMetaHeaderSize) != 0)) {
 							return -2;
@@ -401,6 +403,12 @@ stopKeyframeSearch:
 		if(tsm)
 			*tsm = nTimeStamp;
 
+                // Return 0 if this was completed nicely with invoke message Play.Stop or Play.Complete
+                if (rtnGetNextMediaPacket == 2) {
+                        Log(LOGDEBUG, "Got Play.Complete or Play.Stop from server. Assuming stream is complete");
+                        return 0;
+                }
+
 		return size;
 	}
 
@@ -484,7 +492,7 @@ int main(int argc, char **argv)
 	}
 
  	LogPrintf("FLVStreamer %s\n", RTMPDUMP_VERSION);
-	LogPrintf("(c) 2009 Andrej Stepanchuk, license: GPL\n");
+	LogPrintf("(c) 2009 Andrej Stepanchuk, The Flvstreamer Team, license: GPL\n");
 
 	int opt;
 	struct option longopts[] = {
@@ -748,7 +756,7 @@ int main(int argc, char **argv)
 				goto clean;
 			}
 			if(buffer[0] != 'F' || buffer[1] != 'L' || buffer[2] != 'V' || buffer[3] != 0x01) {
-				Log(LOGERROR, "Inavlid FLV file!");
+				Log(LOGERROR, "Invalid FLV file!");
 				nStatus = RD_FAILED;
                                 goto clean;
 			}
@@ -986,7 +994,7 @@ start:
 		LogPrintf("Failed to connect!\n");
 		return RD_FAILED;
 	}
-	LogPrintf("Connected...\n");
+	Log(LOGINFO, "Connected...");
 	//}
 	
 	/*#ifdef _DEBUG
@@ -999,13 +1007,16 @@ start:
 	}
 
 	// print initial status
-	LogPrintf("Starting download at ");
-	if(duration > 0) {
+	// Workaround to exit with 0 if the file is fully (> 99.9%) downloaded
+	if( duration > 0 && (double)timestamp >= (double)duration*999.0 ) {
+                LogPrintf("Already Completed at: TS=%.1f Duration=%.1f\n", (double)timestamp, (double)duration);
+                goto clean;
+        } else if(duration > 0) {
 		percent = ((double)timestamp) / (duration*1000.0)*100.0;
                 percent = round(percent*10.0)/10.0;
-                LogPrintf("%.3f KB (%.1f%%)\n", (double)size/1024.0, percent);
+                LogPrintf("Starting download at %.3f KB (%.1f%%)\n", (double)size/1024.0, percent);
         } else {
-                LogPrintf("%.3f KB\n", (double)size/1024.0);
+                LogPrintf("Starting download at %.3f KB\n", (double)size/1024.0);
         }
 
 	// write FLV header if not resuming
@@ -1064,27 +1075,47 @@ start:
 
 	} while(!bCtrlC && nRead > -1 && rtmp->IsConnected());
 
+	// finalize header by writing the correct dataType (video, audio, video+audio)
+	if(!bResume && dataType != 0x5 && !bStdoutMode) {
+		Log(LOGDEBUG, "Writing data type: %02X", dataType);
+		fseek(file, 4, SEEK_SET);
+		fwrite(&dataType, sizeof(unsigned char), 1, file);
+	}
+
+	// If nRead is zero then assume complete
+	if(nRead == 0) {
+	        LogPrintf("\rDownload complete\n");
+	        nStatus = RD_SUCCESS;
+	        goto clean;
+	}
+	
 	if(bResume && nRead == -2) {
-		LogPrintf("Couldn't resume FLV file, try --skip %d\n\n", nSkipKeyFrames+1);
+		LogPrintf("\rCouldn't resume FLV file, try --skip %d\n\n", nSkipKeyFrames+1);
 		nStatus = RD_FAILED;
 		goto clean;
 	}
 
-	// finalize header by writing the correct dataType (video, audio, video+audio)
-	if(!bResume && dataType != 0x5 && !bStdoutMode) {
-		//Log(LOGDEBUG, "Writing data type: %02X", dataType);
-		fseek(file, 4, SEEK_SET);
-		fwrite(&dataType, sizeof(unsigned char), 1, file);
-	}
-	if((duration > 0 && percent < 99.9) || bCtrlC || nRead != (-1)) {
-		Log(LOGWARNING, "Download may be incomplete (downloaded about %.1f%%), try --resume!", percent);
+	if( bLiveStream == false && ((duration > 0 && percent < 99.9) || bCtrlC || nRead != (-1) ) ) {
+		LogPrintf("\rDownload may be incomplete (downloaded about %.2f%%), try --resume\n", percent);
 		nStatus = RD_INCOMPLETE;
 	}
 
+	// If duration is available then assume the download is complete if > 99.9%
+	if (duration > 0 && percent > 99.9) {
+	        LogPrintf("\rDownload complete\n");
+	        nStatus = RD_SUCCESS;
+	        goto clean;
+	}
+
+	// Ensure we have a non-zero exit code where WriteStream has failed
+	if (nRead < 0)
+                nStatus = RD_INCOMPLETE;
+                
+Log(LOGDEBUG, "nStatus: %d, nRead: %d", nStatus, nRead);
 clean:
-	LogPrintf("Closing connection... ");
+	LogPrintf("\rClosing connection.\n");
 	rtmp->Close();
-	LogPrintf("done!\n\n");
+	//LogPrintf("done!\n\n");
 
 	if(file != 0)
 		fclose(file);
