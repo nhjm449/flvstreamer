@@ -36,7 +36,7 @@
 
 using namespace RTMP_LIB;
 
-#define RTMPDUMP_VERSION	"v1.7"
+#define RTMPDUMP_VERSION	"v1.8"
 
 #define RD_SUCCESS		0
 #define RD_FAILED		1
@@ -466,8 +466,9 @@ int main(int argc, char **argv)
 
 	char *flvFile = 0;
 
-	char DEFAULT_FLASH_VER[]  = "LNX 9,0,124,0";
-
+	//char DEFAULT_FLASH_VER[]  = "LNX 9,0,124,0";
+	char DEFAULT_FLASH_VER[]  = "LNX 10,0,22,87";
+	
  	LogPrintf("FLVStreamer %s\n", RTMPDUMP_VERSION);
 	LogPrintf("(c) 2009 Andrej Stepanchuk, license: GPL\n\n");
 
@@ -491,6 +492,9 @@ int main(int argc, char **argv)
 		{"timeout", 1, NULL, 'm'},
 		{"buffer",  1, NULL, 'b'},
 		{"skip",    1, NULL, 'k'},
+		//{"debug",   1, NULL, 'd'},
+		//{"quiet",   1, NULL, 'q'},
+		//{"verbose", 1, NULL, 'x'},
 		{0,0,0,0}
 	};
 
@@ -501,6 +505,9 @@ int main(int argc, char **argv)
 			case 'h':
 				LogPrintf("\nThis program streams the flv media content from an rtmp server to stdout.\n\n");
 				LogPrintf("--help|-h               Prints this help screen.\n");
+				//LogPrintf("--quiet|-q              Supresses all command output.\n");
+				//LogPrintf("--verbose|-x            Verbose command output.\n");
+				//LogPrintf("--debug|-d              Debug level command output.\n");
 				LogPrintf("--rtmp|-r url           URL (e.g. rtmp//hotname[:port]/path)\n");
 				LogPrintf("--host|-n hostname      Overrides the hostname in the rtmp url\n");
 				LogPrintf("--port|-c port          Overrides the port in the rtmp url\n");

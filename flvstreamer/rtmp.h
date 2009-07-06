@@ -145,6 +145,7 @@ class CRTMP
       bool SendPing(short nType, unsigned int nObject, unsigned int nTime = 0);
       bool SendBGHasStream(double dId, char *playpath);
       bool SendCreateStream(double dStreamId);
+      bool SendFCSubscribe();
       bool SendPlay();
       bool SendPause();
       bool SendSeek(double dTime);

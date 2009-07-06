@@ -576,6 +576,26 @@ bool CRTMP::SendCreateStream(double dStreamId)
   return SendRTMP(packet);
 }
 
+bool CRTMP::SendFCSubscribe()
+{
+  RTMPPacket packet;
+  packet.m_nChannel = 0x03;   // control channel (invoke)
+  packet.m_headerType = RTMP_PACKET_SIZE_MEDIUM;
+  packet.m_packetType = 0x14; // INVOKE
+
+  packet.AllocPacket(256); // should be enough
+  char *enc = packet.m_body;
+  enc += EncodeString(enc, "FCSubscribe");
+  enc += EncodeNumber(enc, 0);
+  *enc = 0x05; // NULL
+  enc++;
+  enc += EncodeString(enc, Link.playpath);
+
+  packet.m_nBodySize = enc - packet.m_body;
+
+  return SendRTMP(packet);
+}
+
 bool CRTMP::SendPause()
 {
   RTMPPacket packet;
@@ -811,6 +831,10 @@ void CRTMP::HandleInvoke(const char *body, unsigned int nBodySize)
       SendPing(3, 0, 300);
 
       SendCreateStream(2.0);
+
+      // Only send the FCSubscribe if live stream
+      if(Link.bLiveStream)
+        SendFCSubscribe();
     }
     else if (methodInvoked == "createStream")
     {
@@ -832,6 +856,10 @@ void CRTMP::HandleInvoke(const char *body, unsigned int nBodySize)
   else if (method == "onBWDone")
   {
     //SendCheckBW();
+  }
+  else if (method == "onFCSubscribe")
+  {
+    //SendonFCSubscribe(); ???
   }
   else if (method == "_onbwcheck")
   {

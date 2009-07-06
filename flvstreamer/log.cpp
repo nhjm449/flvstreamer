@@ -20,6 +20,7 @@
 
 #include <stdio.h>
 #include <stdarg.h>
+#include <string.h>
 
 #include "log.h"
 
@@ -56,8 +57,13 @@ void Log(int level, const char *format, ...)
         vsnprintf(str, MAX_PRINT_LEN-1, format, args);
         va_end(args);
 
-	//if(level != LOGDEBUG)
-        fprintf(fmsg, "\r%s: %s\n", level==LOGDEBUG?"DEBUG":(level==LOGERROR?"ERROR":(level==LOGWARNING?"WARNING":"INFO")), str);
+	// Filter out 'no-name'
+	if ( debuglevel<LOGALL && strstr(str, "no-name" ) != NULL )
+	  return;
+
+        if ( level <= debuglevel )
+          fprintf(fmsg, "\r%s: %s\n", level==LOGDEBUG?"DEBUG":(level==LOGERROR?"ERROR":(level==LOGWARNING?"WARNING":(level==LOGCRIT?"CRIT":"INFO"))), str);
+  
 	#ifdef _DEBUG
 	fflush(fmsg);
 	#endif
