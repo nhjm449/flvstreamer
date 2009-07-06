@@ -26,9 +26,6 @@
 // Enable this to get full debugging output
 //#define _DEBUG
 
-// Change this line to reduce or increase command verbosity
-#define debuglevel LOGDEBUG
-
 #ifdef _DEBUG
 #undef NODEBUG
 #endif

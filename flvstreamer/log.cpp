@@ -26,6 +26,8 @@
 
 #define MAX_PRINT_LEN	2048
 
+extern int debuglevel;
+
 FILE *fmsg = stderr;
 
 void LogSetOutput(FILE *file)
@@ -36,11 +38,13 @@ void LogSetOutput(FILE *file)
 void LogPrintf(const char *format, ...)
 {
         char str[MAX_PRINT_LEN]="";
-
         va_list args;
         va_start(args, format);
         vsnprintf(str, MAX_PRINT_LEN-1, format, args);
         va_end(args);
+
+        if ( debuglevel==LOGCRIT )
+          return;
 
         fprintf(fmsg, "%s", str);
 	#ifdef _DEBUG
@@ -51,7 +55,6 @@ void LogPrintf(const char *format, ...)
 void Log(int level, const char *format, ...)
 {
         char str[MAX_PRINT_LEN]="";
-
         va_list args;
         va_start(args, format);
         vsnprintf(str, MAX_PRINT_LEN-1, format, args);
@@ -71,6 +74,8 @@ void Log(int level, const char *format, ...)
 
 void LogHex(const char *data, unsigned long len)
 {
+        if ( debuglevel==LOGCRIT )
+          return;
 	for(unsigned long i=0; i<len; i++) {
 		LogPrintf("%02X ", (unsigned char)data[i]);
 	}
@@ -79,6 +84,8 @@ void LogHex(const char *data, unsigned long len)
 
 void LogHexString(const char *data, unsigned long len)
 {
+        if ( debuglevel==LOGCRIT )
+          return;
         for(unsigned long i=0; i<len; i++) {
                 LogPrintf("%02X ", (unsigned char)data[i]);
         }

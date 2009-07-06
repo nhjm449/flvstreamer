@@ -78,6 +78,7 @@ typedef struct
         char *app;
         char *auth;
 	char *flashVer;
+	char *subscribepath;
 
 	double seekTime;
 	bool bLiveStream;
@@ -107,6 +108,7 @@ class CRTMP
 	char *app, 
 	char *auth,
 	char *flashVer, 
+	char *subscribepath, 
       	double dTime,
 	bool bLiveStream,
 	long int timeout=300);
@@ -133,7 +135,7 @@ class CRTMP
       static double ReadNumber(const char *data);
 
       static bool FindFirstMatchingProperty(AMFObject &obj, std::string name, AMFObjectProperty &p);
-
+      
     protected:
       bool HandShake();
       bool Connect();
@@ -145,7 +147,7 @@ class CRTMP
       bool SendPing(short nType, unsigned int nObject, unsigned int nTime = 0);
       bool SendBGHasStream(double dId, char *playpath);
       bool SendCreateStream(double dStreamId);
-      bool SendFCSubscribe();
+      bool SendFCSubscribe(char *subscribepath);
       bool SendPlay();
       bool SendPause();
       bool SendSeek(double dTime);

@@ -121,7 +121,8 @@ bool CRTMP::Connect(
 	char *pageUrl, 
 	char *app, 
 	char *auth,
-	char *flashVer, 
+	char *flashVer,
+	char *subscribepath,
 	double dTime,
 	bool bLiveStream,
 	long int timeout
@@ -129,28 +130,30 @@ bool CRTMP::Connect(
 {
   assert(protocol < 6);
 
-  Log(LOGDEBUG, "Protocol : %s", RTMPProtocolStrings[protocol]);
-  Log(LOGDEBUG, "Hostname : %s", hostname);
-  Log(LOGDEBUG, "Port     : %d", port);
-  Log(LOGDEBUG, "Playpath : %s", playpath);
+  Log(LOGDEBUG, "Protocol      : %s", RTMPProtocolStrings[protocol]);
+  Log(LOGDEBUG, "Hostname      : %s", hostname);
+  Log(LOGDEBUG, "Port          : %d", port);
+  Log(LOGDEBUG, "Playpath      : %s", playpath);
 
   if(tcUrl)
-  	Log(LOGDEBUG, "tcUrl    : %s", tcUrl);
+  	Log(LOGDEBUG, "tcUrl         : %s", tcUrl);
   if(swfUrl)
-  	Log(LOGDEBUG, "swfUrl   : %s", swfUrl);
+  	Log(LOGDEBUG, "swfUrl        : %s", swfUrl);
   if(pageUrl)
-  	Log(LOGDEBUG, "pageUrl  : %s", pageUrl);
+  	Log(LOGDEBUG, "pageUrl       : %s", pageUrl);
   if(app)
-  	Log(LOGDEBUG, "app      : %s", app);
+  	Log(LOGDEBUG, "app           : %s", app);
   if(auth)
-  	Log(LOGDEBUG, "auth     : %s", auth);
+  	Log(LOGDEBUG, "auth          : %s", auth);
+  if(subscribepath)
+  	Log(LOGDEBUG, "subscribepath : %s", subscribepath);
   if(flashVer)
-  	Log(LOGDEBUG, "flashVer : %s", flashVer);
+  	Log(LOGDEBUG, "flashVer      : %s", flashVer);
   if(dTime > 0)
-  	Log(LOGDEBUG, "SeekTime : %lf", dTime);
+  	Log(LOGDEBUG, "SeekTime      : %lf", dTime);
 
-  Log(LOGDEBUG,       "live     : %s", bLiveStream ? "yes":"no");
-  Log(LOGDEBUG,       "timeout  : %d sec", timeout);
+  Log(LOGDEBUG,       "live          : %s", bLiveStream ? "yes":"no");
+  Log(LOGDEBUG,       "timeout       : %d sec", timeout);
 
   Link.tcUrl = tcUrl;
   Link.swfUrl = swfUrl;
@@ -158,6 +161,7 @@ bool CRTMP::Connect(
   Link.app = app;
   Link.auth = auth;
   Link.flashVer = flashVer;
+  Link.subscribepath = subscribepath;
   Link.seekTime = dTime;
   Link.bLiveStream = bLiveStream;
   Link.timeout = timeout;
@@ -564,7 +568,7 @@ bool CRTMP::SendCreateStream(double dStreamId)
   packet.m_headerType = RTMP_PACKET_SIZE_MEDIUM;
   packet.m_packetType = 0x14; // INVOKE
 
-  packet.AllocPacket(256); // should be enough
+  packet.AllocPacket(1024); // should be enough
   char *enc = packet.m_body;
   enc += EncodeString(enc, "createStream");
   enc += EncodeNumber(enc, dStreamId);
@@ -576,7 +580,7 @@ bool CRTMP::SendCreateStream(double dStreamId)
   return SendRTMP(packet);
 }
 
-bool CRTMP::SendFCSubscribe()
+bool CRTMP::SendFCSubscribe(char *subscribepath)
 {
   RTMPPacket packet;
   packet.m_nChannel = 0x03;   // control channel (invoke)
@@ -584,12 +588,13 @@ bool CRTMP::SendFCSubscribe()
   packet.m_packetType = 0x14; // INVOKE
 
   packet.AllocPacket(256); // should be enough
+  Log(LOGDEBUG, "FCSubscribe: %s", subscribepath);
   char *enc = packet.m_body;
   enc += EncodeString(enc, "FCSubscribe");
   enc += EncodeNumber(enc, 0);
   *enc = 0x05; // NULL
   enc++;
-  enc += EncodeString(enc, Link.playpath);
+  enc += EncodeString(enc, subscribepath);
 
   packet.m_nBodySize = enc - packet.m_body;
 
@@ -717,7 +722,7 @@ bool CRTMP::SendPlay()
   packet.m_packetType = 0x14; // INVOKE
   packet.m_nInfoField2 = m_stream_id; //0x01000000;
 
-  packet.AllocPacket(256); // should be enough
+  packet.AllocPacket(1024); // should be enough
   char *enc = packet.m_body;
   enc += EncodeString(enc, "play");
   enc += EncodeNumber(enc, 0.0); // stream id??
@@ -832,9 +837,11 @@ void CRTMP::HandleInvoke(const char *body, unsigned int nBodySize)
 
       SendCreateStream(2.0);
 
-      // Only send the FCSubscribe if live stream
-      if(Link.bLiveStream)
-        SendFCSubscribe();
+      // Send the FCSubscribe if live stream or if subscribepath is set
+      if (Link.subscribepath)
+        SendFCSubscribe(Link.subscribepath);
+      else if (Link.bLiveStream)
+        SendFCSubscribe(Link.playpath);
     }
     else if (methodInvoked == "createStream")
     {
@@ -859,7 +866,7 @@ void CRTMP::HandleInvoke(const char *body, unsigned int nBodySize)
   }
   else if (method == "onFCSubscribe")
   {
-    //SendonFCSubscribe(); ???
+    // SendOnFCSubscribe();
   }
   else if (method == "_onbwcheck")
   {

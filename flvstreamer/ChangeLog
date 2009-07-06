@@ -1,6 +1,18 @@
 FLVStreamer
 Copyright 2008-2009 Andrej Stepanchuk; Distributed under the GPL v2
 
+20 Jun 2009, v1.8a
+
+- Added changes adapted from patch from daftcat75 for mlbviewer
+
+- Added --subscribe <subscribe path> option. Default is to use playpath if --live is specified
+
+- Increased memory allocation fo CreateStream and Play packets to 1024 bytes
+
+- Added --debug, --verbose and --quiet options
+
+- Made default output level LOGINFO
+
 19 Jun 2009, v1.8
 
 - Added FCSubscribe support for live streams to fix hanging live streams

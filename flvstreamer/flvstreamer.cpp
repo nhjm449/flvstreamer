@@ -34,13 +34,16 @@
 #include "AMFObject.h"
 #include "parseurl.h"
 
+int debuglevel = 1;
+
 using namespace RTMP_LIB;
 
-#define RTMPDUMP_VERSION	"v1.8"
+#define RTMPDUMP_VERSION	"v1.8a"
 
 #define RD_SUCCESS		0
 #define RD_FAILED		1
 #define RD_INCOMPLETE		2
+
 
 // starts sockets
 bool InitSockets() 
@@ -450,6 +453,7 @@ int main(int argc, char **argv)
 
 	char *hostname = 0;
 	char *playpath = 0;
+	char *subscribepath = 0;
 	int port = -1;
 	int protocol = RTMP_PROTOCOL_UNDEFINED;
 	bool bLiveStream = false; // is it a live stream? then we can't seek/resume
@@ -466,11 +470,21 @@ int main(int argc, char **argv)
 
 	char *flvFile = 0;
 
-	//char DEFAULT_FLASH_VER[]  = "LNX 9,0,124,0";
 	char DEFAULT_FLASH_VER[]  = "LNX 10,0,22,87";
 	
+	signal(SIGINT, sigIntHandler);
+
+	// Check for --quiet option before printing any output
+	int index = 0;
+       	while (index < argc)
+	{
+		if ( strcmp( argv[index], "--quiet")==0 || strcmp( argv[index], "-q")==0 )
+			debuglevel = LOGCRIT;
+		index++;
+	}
+
  	LogPrintf("FLVStreamer %s\n", RTMPDUMP_VERSION);
-	LogPrintf("(c) 2009 Andrej Stepanchuk, license: GPL\n\n");
+	LogPrintf("(c) 2009 Andrej Stepanchuk, license: GPL\n");
 
 	int opt;
 	struct option longopts[] = {
@@ -492,22 +506,18 @@ int main(int argc, char **argv)
 		{"timeout", 1, NULL, 'm'},
 		{"buffer",  1, NULL, 'b'},
 		{"skip",    1, NULL, 'k'},
-		//{"debug",   1, NULL, 'd'},
-		//{"quiet",   1, NULL, 'q'},
-		//{"verbose", 1, NULL, 'x'},
+		{"subscribe",1,NULL, 'd'},
+		{"debug",   0, NULL, 'z'},
+		{"quiet",   0, NULL, 'q'},
+		{"verbose", 0, NULL, 'x'},
 		{0,0,0,0}
 	};
 
-	signal(SIGINT, sigIntHandler);
-
-	while((opt = getopt_long(argc, argv, "hver:s:t:p:a:f:o:u:n:c:l:y:m:k:", longopts, NULL)) != -1) {
+	while((opt = getopt_long(argc, argv, "hveqxzr:s:t:p:a:f:o:u:n:c:l:y:m:k:d:", longopts, NULL)) != -1) {
 		switch(opt) {
 			case 'h':
 				LogPrintf("\nThis program streams the flv media content from an rtmp server to stdout.\n\n");
 				LogPrintf("--help|-h               Prints this help screen.\n");
-				//LogPrintf("--quiet|-q              Supresses all command output.\n");
-				//LogPrintf("--verbose|-x            Verbose command output.\n");
-				//LogPrintf("--debug|-d              Debug level command output.\n");
 				LogPrintf("--rtmp|-r url           URL (e.g. rtmp//hotname[:port]/path)\n");
 				LogPrintf("--host|-n hostname      Overrides the hostname in the rtmp url\n");
 				LogPrintf("--port|-c port          Overrides the port in the rtmp url\n");
@@ -520,6 +530,7 @@ int main(int argc, char **argv)
 				LogPrintf("--auth|-u string        Authentication string to be appended to the connect string\n");
 				LogPrintf("--flashVer|-f string    Flash version string (default: \"%s\")\n", DEFAULT_FLASH_VER);
 				LogPrintf("--live|-v               Save a live stream, no --resume (seeking) of live strems possible\n");
+				LogPrintf("--subscribe|-d string   Stream name to subscribe to (otherwise defaults to playpath if live is specifed)\n");
 				LogPrintf("--flv|-o string         FLV dump file\n");
 				LogPrintf("--resume|-e             Resume a partial RTMP download\n");
 				LogPrintf("--timeout|-m num        Timeout connection num seconds (default: %lu)\n", timeout);
@@ -527,6 +538,9 @@ int main(int argc, char **argv)
 					bufferTime);
 				LogPrintf("--skip|-k num           Skip num keyframes when looking for last keyframe to resume from. Useful if resume fails (default: %d)\n\n",
 					nSkipKeyFrames);
+				LogPrintf("--quiet|-q              Supresses all command output.\n");
+				LogPrintf("--verbose|-x            Verbose command output.\n");
+				LogPrintf("--debug|-z              Debug level command output.\n");
 				LogPrintf("If you don't pass parameters for swfUrl, pageUrl, app or auth these propertiews will not be included in the connect ");
 				LogPrintf("packet.\n\n");
 				return RD_SUCCESS;
@@ -553,6 +567,9 @@ int main(int argc, char **argv)
 			case 'v':
 				bLiveStream = true; // no seeking or resuming possible!
 				break;
+			case 'd':
+				subscribepath = optarg;
+				break;
 			case 'n':
 				hostname = optarg;
 				break;
@@ -561,7 +578,7 @@ int main(int argc, char **argv)
 				break;
 			case 'l':
 				protocol = atoi(optarg);
-				if(protocol != RTMP_PROTOCOL_RTMP && protocol != RTMP_PROTOCOL_RTMPE) {
+				if(protocol != RTMP_PROTOCOL_RTMP) {
 					Log(LOGERROR, "Unknown protocol specified: %d", protocol);
 					return RD_FAILED;
 				}
@@ -622,6 +639,15 @@ int main(int argc, char **argv)
 				break;
 			case 'm':
 				timeout = atoi(optarg);
+				break;
+			case 'q':
+				debuglevel = LOGCRIT;
+				break;
+			case 'x':
+				debuglevel = LOGDEBUG;
+				break;
+			case 'z':
+				debuglevel = LOGALL;
 				break;
 			default:
 				LogPrintf("unknown option: %c\n", opt);
@@ -956,11 +982,11 @@ start:
 	//if(!bAudioOnly && dFindSeek >= 10.0)
 	//	dFindSeek-=10.0;
 
-	if (!rtmp->Connect(protocol, hostname, port, playpath, tcUrl, swfUrl, pageUrl, app, auth, flashVer, dSeek, bLiveStream, timeout)) {
+	if (!rtmp->Connect(protocol, hostname, port, playpath, tcUrl, swfUrl, pageUrl, app, auth, flashVer, subscribepath, dSeek, bLiveStream, timeout)) {
 		LogPrintf("Failed to connect!\n");
 		return RD_FAILED;
 	}
-	LogPrintf("Connected...\n\n");
+	LogPrintf("Connected...\n");
 	//}
 	
 	/*#ifdef _DEBUG

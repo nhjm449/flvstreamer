@@ -1,4 +1,4 @@
-flv streamer v1.8
+flv streamer v1.8a
 (C) 2009 Andrej Stepanchuk
 License: GPLv2
 
@@ -15,7 +15,7 @@ or to cross compile
 
 To download an rtmp stream use
 
-  $ ./get_iplayer --get 1 --vmode flashhigh --rtmpdump "./flvstreamer"
+  $ ./get_iplayer --get 1 --vmode flashhigh --flvstreamer "./flvstreamer"
 
 Credit goes to team boxee for the XBMC RTMP code used in flvstreamer.
 
