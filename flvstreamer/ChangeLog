@@ -1,6 +1,14 @@
 FLVStreamer
 Copyright 2008-2009 Andrej Stepanchuk, The Flvstreamer Team; Distributed under the GPL v2
 
+7 Jul 2009, v1.8c
+
+- Added --stop <secs> and --start <secs> options to specify absolute start and stop offset timestamps for a stream
+
+- The --stop option can be used to specify the duration of live streaming
+
+- Progress additionally displays timestamp in seconds
+
 6 Jul 2009, v1.8b
 
 - Exit codes now reflect success of download. 

@@ -5,17 +5,15 @@ License: GPLv2
 To compile just type
 
   $ make flvstreamer
-  $ make streams
 
 or to cross compile
 
- $ make -f MakefileWIN32 flvstreamer 
+ $ make -f MakefileWIN32 flvstreamer
  $ make -f MakefileARM flvstreamer
- $ make -f MakefileARM streams
 
 To download an rtmp stream use
 
-  $ ./get_iplayer --get 1 --vmode flashhigh --flvstreamer "./flvstreamer"
+  $ ./get_iplayer --get 1 --modes flashhigh --flvstreamer "./flvstreamer"
 
 Credit goes to team boxee for the XBMC RTMP code used in flvstreamer.
 

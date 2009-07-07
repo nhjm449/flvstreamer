@@ -38,7 +38,7 @@ int debuglevel = 1;
 
 using namespace RTMP_LIB;
 
-#define RTMPDUMP_VERSION	"v1.8b"
+#define RTMPDUMP_VERSION	"v1.8c"
 
 #define RD_SUCCESS		0
 #define RD_FAILED		1
@@ -466,7 +466,9 @@ int main(int argc, char **argv)
 	int protocol = RTMP_PROTOCOL_UNDEFINED;
 	bool bLiveStream = false; // is it a live stream? then we can't seek/resume
 
-	long int timeout = 300; // timeout connection afte 300 seconds
+	long int timeout = 300; // timeout connection after 300 seconds
+	uint32_t dStartOffset = 0; // seek position in non-live mode
+	uint32_t dStopOffset = 0;
 
 	char *rtmpurl = 0;
 	char *swfUrl = 0;
@@ -515,13 +517,15 @@ int main(int argc, char **argv)
 		{"buffer",  1, NULL, 'b'},
 		{"skip",    1, NULL, 'k'},
 		{"subscribe",1,NULL, 'd'},
+		{"start",   1, NULL, 'A'},
+		{"stop",    1, NULL, 'B'},
 		{"debug",   0, NULL, 'z'},
 		{"quiet",   0, NULL, 'q'},
 		{"verbose", 0, NULL, 'x'},
 		{0,0,0,0}
 	};
 
-	while((opt = getopt_long(argc, argv, "hveqxzr:s:t:p:a:f:o:u:n:c:l:y:m:k:d:", longopts, NULL)) != -1) {
+	while((opt = getopt_long(argc, argv, "hveqxzr:s:t:p:a:f:o:u:n:c:l:y:m:k:d:A:B:", longopts, NULL)) != -1) {
 		switch(opt) {
 			case 'h':
 				LogPrintf("\nThis program streams the flv media content from an rtmp server to stdout.\n\n");
@@ -542,6 +546,8 @@ int main(int argc, char **argv)
 				LogPrintf("--flv|-o string         FLV dump file\n");
 				LogPrintf("--resume|-e             Resume a partial RTMP download\n");
 				LogPrintf("--timeout|-m num        Timeout connection num seconds (default: %lu)\n", timeout);
+				LogPrintf("--start|-A num          Start at num seconds into stream (not valid when using --live)\n");
+				LogPrintf("--stop|-B num           Stop at num seconds into stream\n");
 				LogPrintf("--buffer|-b             Buffer time in milliseconds (default: %lu), this option makes only sense in stdout mode (-o -)\n", 
 					bufferTime);
 				LogPrintf("--skip|-k num           Skip num keyframes when looking for last keyframe to resume from. Useful if resume fails (default: %d)\n\n",
@@ -647,6 +653,14 @@ int main(int argc, char **argv)
 				break;
 			case 'm':
 				timeout = atoi(optarg);
+				break;
+			case 'A':
+				dStartOffset = int(atof(optarg)*1000.0);
+                                //printf("dStartOffset = %d\n", dStartOffset);
+				break;
+			case 'B':
+				dStopOffset = int(atof(optarg)*1000.0);
+                                //printf("dStartOffset = %d\n", dStartOffset);
 				break;
 			case 'q':
 				debuglevel = LOGCRIT;
@@ -783,7 +797,7 @@ int main(int argc, char **argv)
 				Log(LOGWARNING, "First prevTagSize is not zero: prevTagSize = 0x%08X", prevTagSize);
 			}
 
-			// go through the file to find the mata data!
+			// go through the file to find the meta data!
 			uint32_t pos = dataOffset+4;
 			bool bFoundMetaHeader = false;
 
@@ -984,6 +998,17 @@ start:
 
 	LogPrintf("Connecting ...\n");
 
+	// User defined seek offset
+	if (dStartOffset > 0) {
+        	if (bLiveStream)
+                	Log(LOGWARNING, "Can't seek in a live stream, ignoring --seek option");
+                // Don't need the offset if resuming an existing file
+                else if (bResume)
+                        Log(LOGDEBUG, "Can't seek a resumed stream, ignoring --seek option");
+                else
+                        dSeek += dStartOffset;
+        }
+
 	//{ // here we decrease the seek time by 10ms to make sure the server starts with the next keyframe
 	//double dFindSeek = dSeek;
 
@@ -1014,9 +1039,9 @@ start:
         } else if(duration > 0) {
 		percent = ((double)timestamp) / (duration*1000.0)*100.0;
                 percent = round(percent*10.0)/10.0;
-                LogPrintf("Starting download at %.3f KB (%.1f%%)\n", (double)size/1024.0, percent);
+                LogPrintf("Starting download at %.3f kB (%.1f%%)\n", (double)size/1024.0, percent);
         } else {
-                LogPrintf("Starting download at %.3f KB\n", (double)size/1024.0);
+                LogPrintf("Starting download at %.3f kB\n", (double)size/1024.0);
         }
 
 	// write FLV header if not resuming
@@ -1035,7 +1060,6 @@ start:
 			goto clean;
 		}
 	}
-
 	do
 	{
 		nRead = WriteStream(rtmp, &buffer, bufferSize, &timestamp, bResume, dSeek, metaHeader, nMetaHeaderSize, initialFrame, initialFrameType, nInitialFrameSize, &dataType);
@@ -1064,14 +1088,21 @@ start:
 				}
 				percent = ((double)timestamp) / (duration*1000.0)*100.0;
 				percent = round(percent*10.0)/10.0;
-				LogPrintf("\r%.3f KB (%.1f%%)", (double)size/1024.0, percent);
+				LogPrintf("\r%.3f kB / %.2f sec (%.1f%%)", (double)size/1024.0, (double)(timestamp)/1000.0, percent);
 			} else {
-				LogPrintf("\r%.3f KB", (double)size/1024.0);
+				LogPrintf("\r%.3f kB / %.2f sec", (double)size/1024.0, (double)(timestamp)/1000.0);
 			}
 		}
 		#ifdef _DEBUG
 		else { Log(LOGDEBUG, "zero read!"); }
 		#endif
+
+		// Force clean close if a specified stop offset is reached
+		if (dStopOffset && timestamp >= dStopOffset) {
+		        LogPrintf("\nStop offset has been reached at %.2f seconds\n", (double)dStopOffset/1000.0);
+		        nRead = 0;
+		        rtmp->Close();
+		}
 
 	} while(!bCtrlC && nRead > -1 && rtmp->IsConnected());
 
@@ -1111,7 +1142,7 @@ start:
 	if (nRead < 0)
                 nStatus = RD_INCOMPLETE;
                 
-Log(LOGDEBUG, "nStatus: %d, nRead: %d", nStatus, nRead);
+        //Log(LOGDEBUG, "nStatus: %d, nRead: %d", nStatus, nRead);
 clean:
 	LogPrintf("\rClosing connection.\n");
 	rtmp->Close();
