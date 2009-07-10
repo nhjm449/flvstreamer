@@ -929,6 +929,50 @@ bool CRTMP::FindFirstMatchingProperty(AMFObject &obj, std::string name, AMFObjec
 	return false;
 }
 
+bool CRTMP::DumpMetaData(AMFObject &obj)
+{
+        std::string name;
+        AMFObjectProperty prop;
+	for (int n=0; n<obj.GetPropertyCount(); n++) {
+		AMFObjectProperty prop = obj.GetProperty(n);
+		if ( prop.GetType() != AMF_OBJECT ) {
+			char str[256]="";
+			switch( prop.GetType() )
+			{
+				case AMF_NUMBER:
+					if ( (double)int(prop.GetNumber()) == prop.GetNumber() )
+						snprintf(str, 255, "%.0f", prop.GetNumber() );
+					else
+						snprintf(str, 255, "%.2f", prop.GetNumber() );
+					break;
+				case AMF_BOOLEAN:
+					snprintf(str, 255, "%s", prop.GetNumber() == 1.?"TRUE":"FALSE");
+					break;
+				case AMF_STRING:
+					snprintf(str, 255, "%s", prop.GetString().c_str());
+					break;
+				case AMF_DATE:
+					snprintf(str, 255, "timestamp:%.2f", prop.GetNumber() );
+					break;
+				default:
+					snprintf(str, 255, "INVALID TYPE 0x%02x", (unsigned char)prop.GetType() );
+			}
+			if ( prop.GetPropName() != "" ) {
+				// chomp
+				if ( strlen(str) >= 1 && str[strlen(str)-1 ] == '\n')
+					str[strlen(str)-1] = '\0';
+				LogPrintf("  %-22s%s\n", prop.GetPropName().c_str(), str );
+			}
+		} else {
+			if ( prop.GetPropName() != "" )
+				LogPrintf("%s:\n", prop.GetPropName().c_str() );
+			AMFObject next = prop.GetObject();
+			DumpMetaData(next);
+		}
+	}
+	return false;
+}
+
 void CRTMP::HandleMetadata(char *body, unsigned int len)
 {
 	/*Log(LOGDEBUG,"Parsing meta data: %d @0x%08X", packet.m_nBodySize, packet.m_body);
@@ -958,10 +1002,14 @@ void CRTMP::HandleMetadata(char *body, unsigned int len)
   	std::string metastring = obj.GetProperty(0).GetString();
 
 	if(metastring == "onMetaData") {
+		// Show metadata
+		LogPrintf("\r%s\n", "Metadata:                  " );
+		DumpMetaData(obj);
 		AMFObjectProperty prop;
+		// Extract duration of stream
 		if(FindFirstMatchingProperty(obj, "duration", prop)) {
 			m_fDuration = prop.GetNumber();
-			Log(LOGDEBUG, "Set duration: %f", m_fDuration);
+			//Log(LOGDEBUG, "Set duration: %.2f seconds", m_fDuration);
 		}
 	}
 }

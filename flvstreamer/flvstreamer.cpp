@@ -38,7 +38,7 @@ int debuglevel = 1;
 
 using namespace RTMP_LIB;
 
-#define RTMPDUMP_VERSION	"v1.8c"
+#define RTMPDUMP_VERSION	"v1.8d"
 
 #define RD_SUCCESS		0
 #define RD_FAILED		1
@@ -533,7 +533,7 @@ int main(int argc, char **argv)
 				LogPrintf("--rtmp|-r url           URL (e.g. rtmp//hotname[:port]/path)\n");
 				LogPrintf("--host|-n hostname      Overrides the hostname in the rtmp url\n");
 				LogPrintf("--port|-c port          Overrides the port in the rtmp url\n");
-				LogPrintf("--protocol|-l           Overrides the protocol in the rtmp url (0 - RTMP, 3 - RTMPE)\n");
+				LogPrintf("--protocol|-l           Overrides the protocol in the rtmp url (0 - RTMP)\n");
 				LogPrintf("--playpath|-y           Overrides the playpath parsed from rtmp url\n");
 				LogPrintf("--swfUrl|-s url         URL to player swf file\n");
 				LogPrintf("--tcUrl|-t url          URL to played stream (default: \"rtmp://host[:port]/app\")\n");
@@ -541,7 +541,7 @@ int main(int argc, char **argv)
 				LogPrintf("--app|-a app            Name of player used\n");
 				LogPrintf("--auth|-u string        Authentication string to be appended to the connect string\n");
 				LogPrintf("--flashVer|-f string    Flash version string (default: \"%s\")\n", DEFAULT_FLASH_VER);
-				LogPrintf("--live|-v               Save a live stream, no --resume (seeking) of live strems possible\n");
+				LogPrintf("--live|-v               Save a live stream, no --resume (seeking) of live streams possible\n");
 				LogPrintf("--subscribe|-d string   Stream name to subscribe to (otherwise defaults to playpath if live is specifed)\n");
 				LogPrintf("--flv|-o string         FLV dump file\n");
 				LogPrintf("--resume|-e             Resume a partial RTMP download\n");

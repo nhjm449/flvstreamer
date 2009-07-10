@@ -134,6 +134,7 @@ class CRTMP
       static bool ReadBool(const char *data);
       static double ReadNumber(const char *data);
 
+      static bool DumpMetaData(AMFObject &obj);
       static bool FindFirstMatchingProperty(AMFObject &obj, std::string name, AMFObjectProperty &p);
       
     protected:
