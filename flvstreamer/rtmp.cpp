@@ -504,7 +504,7 @@ bool CRTMP::SendConnectPacket()
   
   enc += EncodeBoolean(enc, "fpad", false);
   enc += EncodeNumber(enc, "capabilities", 15.0);
-  enc += EncodeNumber(enc, "audioCodecs", 1639.0);
+  enc += EncodeNumber(enc, "audioCodecs", 3191.0);
   enc += EncodeNumber(enc, "videoCodecs", 252.0);
   enc += EncodeNumber(enc, "videoFunction", 1.0);
   if(Link.pageUrl)
@@ -593,7 +593,27 @@ bool CRTMP::SendFCSubscribe(char *subscribepath)
   return SendRTMP(packet);
 }
 
-bool CRTMP::SendPause()
+bool CRTMP::SendDeleteStream(double dStreamId)
+{
+  RTMPPacket packet;
+  packet.m_nChannel = 0x03;   // control channel (invoke)
+  packet.m_headerType = RTMP_PACKET_SIZE_MEDIUM;
+  packet.m_packetType = 0x14; // INVOKE
+
+  packet.AllocPacket(256); // should be enough
+  char *enc = packet.m_body;
+  enc += EncodeString(enc, "deleteStream");
+  enc += EncodeNumber(enc, 0.0);
+  *enc = 0x05; // NULL
+  enc++;
+  enc += EncodeNumber(enc, dStreamId);
+
+  packet.m_nBodySize = enc - packet.m_body;
+
+  return SendRTMP(packet);
+}
+
+bool CRTMP::SendPause(bool DoPause, double dTime)
 {
   RTMPPacket packet;
   packet.m_nChannel = 0x08;   // video channel 
@@ -606,8 +626,8 @@ bool CRTMP::SendPause()
   enc += EncodeNumber(enc, 0);
   *enc = 0x05; // NULL
   enc++;
-  enc += EncodeBoolean(enc, true);
-  enc += EncodeNumber(enc, 0);
+  enc += EncodeBoolean(enc, DoPause);
+  enc += EncodeNumber(enc, (double)dTime/1000);
 
   packet.m_nBodySize = enc - packet.m_body;
 
@@ -850,11 +870,12 @@ int CRTMP::HandleInvoke(const char *body, unsigned int nBodySize)
     }
     else if (methodInvoked == "play")
     {
+      SendPlay();
     }
   }
   else if (method == "onBWDone")
   {
-    //SendCheckBW();
+    SendCheckBW();
   }
   else if (method == "onFCSubscribe")
   {

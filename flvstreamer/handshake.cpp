@@ -114,6 +114,10 @@ bool CRTMP::HandShake()
     Log(LOGWARNING, "%s, client signiture does not match!",__FUNCTION__);
   }
 
+  // the second time field is when 1st part was read by the client:
+  uint32_t timeRead = htonl(GetTime());
+  memcpy(serversig+4, &timeRead, 4);
+
   if (!WriteN(serversig, RTMP_SIG_SIZE))
     return false;
 

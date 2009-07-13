@@ -133,7 +133,8 @@ class CRTMP
       static std::string ReadString(const char *data);
       static bool ReadBool(const char *data);
       static double ReadNumber(const char *data);
-
+      bool SendPause(bool DoPause, double dTime);
+       
       static bool DumpMetaData(AMFObject &obj);
       static bool FindFirstMatchingProperty(AMFObject &obj, std::string name, AMFObjectProperty &p);
       
@@ -148,9 +149,9 @@ class CRTMP
       bool SendPing(short nType, unsigned int nObject, unsigned int nTime = 0);
       bool SendBGHasStream(double dId, char *playpath);
       bool SendCreateStream(double dStreamId);
+      bool SendDeleteStream(double dStreamId);
       bool SendFCSubscribe(char *subscribepath);
       bool SendPlay();
-      bool SendPause();
       bool SendSeek(double dTime);
       bool SendBytesReceived();
 
@@ -172,7 +173,8 @@ class CRTMP
       bool WriteN(const char *buffer, int n);
 
       bool FillBuffer();
-
+      void FlushBuffer();
+      
       int  m_socket;
       int  m_chunkSize;
       int  m_nBWCheckCounter;
@@ -196,7 +198,7 @@ class CRTMP
       RTMPPacket m_vecChannelsIn[64];
       RTMPPacket m_vecChannelsOut[64];
       int  m_channelTimestamp[64]; // abs timestamp of last packet
-
+      
       double m_fDuration; // duration of stream in seconds
   };
 };
