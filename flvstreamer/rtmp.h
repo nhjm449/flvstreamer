@@ -156,7 +156,7 @@ class CRTMP
       bool SendBytesReceived();
 
       int HandleInvoke(const char *body, unsigned int nBodySize);
-      void HandleMetadata(char *body, unsigned int len);
+      bool HandleMetadata(char *body, unsigned int len);
       void HandleChangeChunkSize(const RTMPPacket &packet);
       void HandleAudio(const RTMPPacket &packet);
       void HandleVideo(const RTMPPacket &packet);

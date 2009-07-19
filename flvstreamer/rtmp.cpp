@@ -322,8 +322,8 @@ int CRTMP::GetNextMediaPacket(RTMPPacket &packet)
       case 0x12:
         // metadata (notify)
         Log(LOGDEBUG, "%s, received: notify %lu bytes", __FUNCTION__, packet.m_nBodySize);
-        HandleMetadata(packet.m_body, packet.m_nBodySize);
-        bHasMediaPacket = 1;
+        if ( HandleMetadata(packet.m_body, packet.m_nBodySize) )
+          bHasMediaPacket = 1;
         break;
 
       case 0x13:
@@ -994,7 +994,7 @@ bool CRTMP::DumpMetaData(AMFObject &obj)
 	return false;
 }
 
-void CRTMP::HandleMetadata(char *body, unsigned int len)
+bool CRTMP::HandleMetadata(char *body, unsigned int len)
 {
 	/*Log(LOGDEBUG,"Parsing meta data: %d @0x%08X", packet.m_nBodySize, packet.m_body);
 	LogHex(packet.m_body, packet.m_nBodySize);
@@ -1016,7 +1016,7 @@ void CRTMP::HandleMetadata(char *body, unsigned int len)
 	int nRes = obj.Decode(body, len);
 	if(nRes < 0) {
 		Log(LOGERROR, "%s, error decoding meta data packet", __FUNCTION__);
-		return;
+		return false;
 	}
 
 	obj.Dump();
@@ -1032,6 +1032,11 @@ void CRTMP::HandleMetadata(char *body, unsigned int len)
 			m_fDuration = prop.GetNumber();
 			//Log(LOGDEBUG, "Set duration: %.2f seconds", m_fDuration);
 		}
+		return true;
+	}
+	else
+	{
+		return false;
 	}
 }
 

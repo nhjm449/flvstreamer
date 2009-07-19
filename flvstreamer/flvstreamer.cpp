@@ -1132,10 +1132,15 @@ start:
 	}
 
 	// If duration is available then assume the download is complete if > 99.9%
-	if (duration > 0 && percent > 99.9) {
-	        LogPrintf("\rDownload complete\n");
-	        nStatus = RD_SUCCESS;
-	        goto clean;
+	if (bLiveStream == false) {
+		if (duration > 0 && percent > 99.9) {
+			LogPrintf("\rDownload complete\n");
+			nStatus = RD_SUCCESS;
+			goto clean;
+		} else {
+			LogPrintf("\rDownload may be incomplete (downloaded about %.2f%%), try --resume\n", percent);
+			nStatus = RD_INCOMPLETE;
+		}
 	}
 
 	// Ensure we have a non-zero exit code where WriteStream has failed
