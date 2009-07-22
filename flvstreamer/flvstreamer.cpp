@@ -38,7 +38,7 @@ int debuglevel = 1;
 
 using namespace RTMP_LIB;
 
-#define RTMPDUMP_VERSION	"v1.8e"
+#define RTMPDUMP_VERSION	"v1.8e1"
 
 #define RD_SUCCESS		0
 #define RD_FAILED		1

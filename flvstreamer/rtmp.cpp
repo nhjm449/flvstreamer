@@ -509,6 +509,11 @@ bool CRTMP::SendConnectPacket()
   enc += EncodeNumber(enc, "videoFunction", 1.0);
   if(Link.pageUrl)
   	enc += EncodeString(enc, "pageUrl", Link.pageUrl);
+  // TODO: need to send pageUrl with AMF type undefined 0x06 here if pageurl isn't specified
+
+  //empty object
+  *enc=0x09; enc++;
+  *enc=0x03; enc++;
 
   //enc += EncodeNumber(enc, "objectEncoding", 3.0); // use AMF3 objects, not supported yet
   enc += 2; // end of object - 0x00 0x00 0x09
@@ -1385,6 +1390,7 @@ bool CRTMP::SendRTMP(RTMPPacket &packet)
     if (nSize > 0)
     {
       char sep = (0xc0 | packet.m_nChannel);
+      //Log(LOGDEBUG, "SEP: 0x%02x", (unsigned char)sep );
       if (!WriteN(&sep, 1))
         return false;  
     }
