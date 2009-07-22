@@ -1113,6 +1113,25 @@ start:
 		fwrite(&dataType, sizeof(unsigned char), 1, file);
 	}
 
+	if(bResume && nRead == -2) {
+		LogPrintf("\rCouldn't resume FLV file, try --skip %d\n\n", nSkipKeyFrames+1);
+		nStatus = RD_FAILED;
+		goto clean;
+	}
+	
+	// If duration is available then assume the download is complete if > 99.9%
+	if (bLiveStream == false) {
+		if (duration > 0 && percent > 99.9) {
+			LogPrintf("\rDownload complete\n");
+			nStatus = RD_SUCCESS;
+			goto clean;
+		//} else if ( bCtrlC || nRead != (-1) ) {
+		} else {
+			LogPrintf("\rDownload may be incomplete (downloaded about %.2f%%), try --resume\n", percent);
+			nStatus = RD_INCOMPLETE;
+		}
+	}
+
 	// If nRead is zero then assume complete
 	if(nRead == 0) {
 	        LogPrintf("\rDownload complete\n");
@@ -1120,33 +1139,10 @@ start:
 	        goto clean;
 	}
 	
-	if(bResume && nRead == -2) {
-		LogPrintf("\rCouldn't resume FLV file, try --skip %d\n\n", nSkipKeyFrames+1);
-		nStatus = RD_FAILED;
-		goto clean;
-	}
-
-	if( bLiveStream == false && ((duration > 0 && percent < 99.9) || bCtrlC || nRead != (-1) ) ) {
-		LogPrintf("\rDownload may be incomplete (downloaded about %.2f%%), try --resume\n", percent);
-		nStatus = RD_INCOMPLETE;
-	}
-
-	// If duration is available then assume the download is complete if > 99.9%
-	if (bLiveStream == false) {
-		if (duration > 0 && percent > 99.9) {
-			LogPrintf("\rDownload complete\n");
-			nStatus = RD_SUCCESS;
-			goto clean;
-		} else {
-			LogPrintf("\rDownload may be incomplete (downloaded about %.2f%%), try --resume\n", percent);
-			nStatus = RD_INCOMPLETE;
-		}
-	}
-
 	// Ensure we have a non-zero exit code where WriteStream has failed
 	if (nRead < 0)
-                nStatus = RD_INCOMPLETE;
-                
+		nStatus = RD_INCOMPLETE;
+
         //Log(LOGDEBUG, "nStatus: %d, nRead: %d", nStatus, nRead);
 clean:
 	LogPrintf("\rClosing connection.\n");
