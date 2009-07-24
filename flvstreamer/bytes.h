@@ -33,6 +33,12 @@ typedef unsigned long long int uint64_t;
 #define __LITTLE_ENDIAN	LITTLE_ENDIAN
 #define __BYTE_ORDER	BYTE_ORDER
 
+#elif (defined(__ppc__)) // ppc MacOSX
+#include <ppc/endian.h>
+#define __BIG_ENDIAN    BIG_ENDIAN
+#define __LITTLE_ENDIAN LITTLE_ENDIAN
+#define __BYTE_ORDER    BYTE_ORDER
+
 #elif defined(__linux__) //|| defined (__BEOS__) // Linux, BeOS
 #include <endian.h>
 #include <byteswap.h>
