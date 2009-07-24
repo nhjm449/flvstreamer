@@ -27,17 +27,11 @@ typedef unsigned long long int uint64_t;
 #define __LITTLE_ENDIAN LITTLE_ENDIAN
 #define __BYTE_ORDER    BYTE_ORDER
 
-#elif (defined(BSD) && (BSD >= 199103)) || defined(__MacOSX__) // more BSD
+#elif (defined(BSD) && (BSD >= 199103)) || defined(__MacOSX__) || defined (_APPLE_) // more BSD
 #include <machine/endian.h>
 #define __BIG_ENDIAN	BIG_ENDIAN
 #define __LITTLE_ENDIAN	LITTLE_ENDIAN
 #define __BYTE_ORDER	BYTE_ORDER
-
-#elif defined(__ppc__) || defined(__ppc64__) // ppc MacOSX
-#include <ppc/endian.h>
-#define __BIG_ENDIAN    BIG_ENDIAN
-#define __LITTLE_ENDIAN LITTLE_ENDIAN
-#define __BYTE_ORDER    BYTE_ORDER
 
 #elif defined(__linux__) //|| defined (__BEOS__) // Linux, BeOS
 #include <endian.h>
