@@ -1,9 +1,11 @@
 FLVStreamer
 Copyright 2008-2009 Andrej Stepanchuk, The Flvstreamer Team; Distributed under the GPL v2
 
-24 Jul 2009, v1.8f
+28 Jul 2009, v1.8f
 
-- Added endian detection for PPC MacOSX in bytes.h (untested)
+- Added endian detection for PPC MacOSX in bytes.h
+
+- New MakefileOSX which will create universal binaries for Mac (intel and PPC)
 
 - Don't treat notify packets as media packets
 
@@ -12,6 +14,12 @@ Copyright 2008-2009 Andrej Stepanchuk, The Flvstreamer Team; Distributed under t
 - Fix endian define typo
 
 - Add empty object to end of connect request
+
+- The --stop option now also uses the play function to specify the length to stream to play. This allows the option to work better for some streams
+
+- Added sanity checking for the --start and --stop options
+
+- Times are now reported in seconds for readability
 
 12 Jul 2009, v1.8e
 

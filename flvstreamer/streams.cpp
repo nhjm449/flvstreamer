@@ -465,6 +465,7 @@ void processTCPrequest
 
 	CRTMP *rtmp = new CRTMP();
 	uint32_t dSeek = 0; // can be used to start from a later point in the stream
+	uint32_t dLength;    // desired length of stream to play, 0 otherwise
 
 	// reset RTMP options to defaults specified upon invokation of streams
 	RTMP_REQUEST req;
@@ -608,17 +609,30 @@ void processTCPrequest
 
 	// User defined seek offset
 	if (req.dStartOffset > 0) {
-        	if (req.bLiveStream)
+        	if (req.bLiveStream) {
                 	Log(LOGWARNING, "Can't seek in a live stream, ignoring --seek option");
-                else
+                } else {
                         dSeek += req.dStartOffset;
+                }
         }
 
-        if(dSeek != 0) {
-                LogPrintf("Starting at TS: %d ms\n", req.nTimeStamp);
+        // Calculate the length of the stream to still play
+        if (req.dStopOffset > 0) {
+                dLength = req.dStopOffset - dSeek;
+
+                // Quit if start seek is past required stop offset
+                if(dSeek >= req.dStopOffset) {
+                        LogPrintf("Already Completed\n");
+                        goto cleanup;
+                }
         }
 
-        Log(LOGDEBUG, "Setting buffer time to: %dms", req.bufferTime);
+        if(dSeek != 0)
+                LogPrintf("Starting at: %.3f sec\n", (double)req.nTimeStamp/1000.0);
+        if(dLength != 0)
+                LogPrintf("For duration: %.3f sec\n", (double)dLength/1000.0);
+
+        Log(LOGDEBUG, "Setting buffer time to: %.3f sec", (double)req.bufferTime/1000.0);
         rtmp->SetBufferMS(req.bufferTime);
 
 	LogPrintf("Connecting ... port: %d, app: %s\n", req.rtmpport, req.app);
@@ -635,6 +649,7 @@ void processTCPrequest
 			req.flashVer, 
 			req.subscribepath,
 			dSeek,
+			dLength,
 			req.bLiveStream, 
 			req.timeout)) {
                 LogPrintf("%s, failed to connect!\n", __FUNCTION__);
@@ -697,7 +712,7 @@ void processTCPrequest
 
         		// Force clean close if a specified stop offset is reached
         		if (req.dStopOffset && req.nTimeStamp >= req.dStopOffset) {
-        		        LogPrintf("\nStop offset has been reached at %.2f seconds\n", (double)req.dStopOffset/1000.0);
+        		        LogPrintf("\nStop offset has been reached at %.3f sec\n", (double)req.dStopOffset/1000.0);
         		        nRead = 0;
         		        rtmp->Close();
         		}
@@ -916,11 +931,9 @@ bool ParseOption(char opt, char *arg, RTMP_REQUEST *req)
                                 break;
 			case 'A':
 				req->dStartOffset = atoi(arg)*1000;
-                                //printf("dStartOffset = %d\n", dStartOffset);
 				break;
 			case 'B':
 				req->dStopOffset = atoi(arg)*1000;
-                                //printf("dStartOffset = %d\n", dStartOffset);
 				break;
 			case 'q':
 				debuglevel = LOGCRIT;

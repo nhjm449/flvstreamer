@@ -124,6 +124,7 @@ bool CRTMP::Connect(
 	char *flashVer,
 	char *subscribepath,
 	double dTime,
+	double dLength,
 	bool bLiveStream,
 	long int timeout
 )
@@ -150,7 +151,9 @@ bool CRTMP::Connect(
   if(flashVer)
   	Log(LOGDEBUG, "flashVer      : %s", flashVer);
   if(dTime > 0)
-  	Log(LOGDEBUG, "SeekTime      : %lf", dTime);
+  	Log(LOGDEBUG, "SeekTime      : %.3f sec", (double)dTime/1000.0);
+  if(dLength > 0)
+  	Log(LOGDEBUG, "playLength    : %.3f sec", (double)dLength/1000.0);
 
   Log(LOGDEBUG,       "live          : %s", bLiveStream ? "yes":"no");
   Log(LOGDEBUG,       "timeout       : %d sec", timeout);
@@ -163,6 +166,7 @@ bool CRTMP::Connect(
   Link.flashVer = flashVer;
   Link.subscribepath = subscribepath;
   Link.seekTime = dTime;
+  Link.length = dLength;
   Link.bLiveStream = bLiveStream;
   Link.timeout = timeout;
 
@@ -761,12 +765,13 @@ bool CRTMP::SendPlay()
     else
       enc += EncodeNumber(enc, 0.0);//-2000.0); // recorded as default, -2000.0 is not reliable since that freezes the player if the stream is not found
   }
-  
+
   // len: -1, 0, positive number
   //  -1: plays live or recorded stream to the end (default)
   //   0: plays a frame 'start' ms away from the beginning
   //  >0: plays a live or recoded stream for 'len' milliseconds
-  //enc += EncodeNumber(enc, -1.0); // len
+  if(Link.length)
+    enc += EncodeNumber(enc, Link.length); // len
 
   packet.m_nBodySize = enc - packet.m_body;
 

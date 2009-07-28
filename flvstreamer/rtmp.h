@@ -81,6 +81,7 @@ typedef struct
 	char *subscribepath;
 
 	double seekTime;
+	double length;
 	bool bLiveStream;
 
 	long int timeout; // number of seconds before connection times out
@@ -110,6 +111,7 @@ class CRTMP
 	char *flashVer, 
 	char *subscribepath, 
       	double dTime,
+      	double dLength,
 	bool bLiveStream,
 	long int timeout=300);
 
