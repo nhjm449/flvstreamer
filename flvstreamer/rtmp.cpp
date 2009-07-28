@@ -885,7 +885,7 @@ int CRTMP::HandleInvoke(const char *body, unsigned int nBodySize)
   }
   else if (method == "onBWDone")
   {
-    SendCheckBW();
+    //SendCheckBW(); // Causes 10060 recv error on win32
   }
   else if (method == "onFCSubscribe")
   {
