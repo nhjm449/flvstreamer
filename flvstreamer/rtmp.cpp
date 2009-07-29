@@ -1442,7 +1442,7 @@ bool CRTMP::FillBuffer()
     }
     else
     {
-      Log(LOGDEBUG, "%s, recv returned %d. GetSockError(): %d", __FUNCTION__, nBytes, GetSockError());
+      Log(LOGERROR, "%s, recv returned %d. GetSockError(): %d", __FUNCTION__, nBytes, GetSockError());
       Close();
 //      exit(10);
       return false;
