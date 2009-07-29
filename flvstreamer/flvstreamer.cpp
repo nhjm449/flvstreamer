@@ -38,7 +38,7 @@ int debuglevel = 1;
 
 using namespace RTMP_LIB;
 
-#define RTMPDUMP_VERSION	"v1.8g"
+#define RTMPDUMP_VERSION	"v1.8h"
 
 #define RD_SUCCESS		0
 #define RD_FAILED		1
@@ -744,6 +744,7 @@ int main(int argc, char **argv)
 	rtmp->SetBufferMS(bufferTime);
 
 	unsigned long size = 0;
+	unsigned long lastSize = 0;
         uint32_t timestamp = 0;
 
 	// ok, we have to get the timestamp of the last keyframe (only keyframes are seekable) / last audio frame (audio only streams) 
@@ -1103,11 +1104,16 @@ start:
 					rtmp->SetBufferMS(bufferTime);
 					rtmp->UpdateBufferMS();
 				}
-				percent = ((double)timestamp) / (duration*1000.0)*100.0;
-				percent = round(percent*10.0)/10.0;
-				LogPrintf("\r%.3f kB / %.2f sec (%.1f%%)", (double)size/1024.0, (double)(timestamp)/1000.0, percent);
+				percent = round( ((double)timestamp) / (duration*1000.0)*100.0*10.0)/10.0;
+				if ( lastSize <= size - 204800 ) {
+        				LogPrintf("\r%.3f kB / %.2f sec (%.1f%%)", (double)size/1024.0, (double)(timestamp)/1000.0, percent);
+        				lastSize = size;
+                                }
 			} else {
-				LogPrintf("\r%.3f kB / %.2f sec", (double)size/1024.0, (double)(timestamp)/1000.0);
+				if ( lastSize <= size - 204800 ) {
+				        LogPrintf("\r%.3f kB / %.2f sec", (double)size/1024.0, (double)(timestamp)/1000.0);
+        				lastSize = size;
+                                }
 			}
 		}
 		#ifdef _DEBUG
