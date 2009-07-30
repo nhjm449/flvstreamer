@@ -27,6 +27,9 @@
 
 #ifdef WIN32
 #include <winsock.h>
+#include <stdio.h>
+#include <io.h>
+#include <fcntl.h>
 #endif
 
 #include "rtmp.h"
@@ -979,8 +982,13 @@ start:
 		if(file != 0)
 			fclose(file);
 
-		if(bStdoutMode)
+		if(bStdoutMode) {
 			file = stdout;
+			// Allows win32 to use binary mode on stdout
+			#ifdef WIN32
+			_setmode( _fileno( stdout ), _O_BINARY );
+			#endif
+		}
 		else
 		{
 			file = fopen(flvFile, "wb");
