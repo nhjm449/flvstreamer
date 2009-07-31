@@ -524,7 +524,7 @@ int main(int argc, char **argv)
 		{"subscribe",1,NULL, 'd'},
 		{"start",   1, NULL, 'A'},
 		{"stop",    1, NULL, 'B'},
-		{"hashes",  1, NULL, '#'},
+		{"hashes",  0, NULL, '#'},
 		{"debug",   0, NULL, 'z'},
 		{"quiet",   0, NULL, 'q'},
 		{"verbose", 0, NULL, 'x'},
