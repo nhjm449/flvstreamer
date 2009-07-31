@@ -36,11 +36,11 @@
 #include "AMFObject.h"
 #include "parseurl.h"
 
-int debuglevel = 1;
+int debuglevel = LOGERROR;
 
 using namespace RTMP_LIB;
 
-#define RTMPDUMP_STREAMS_VERSION	"v1.4"
+#define RTMPDUMP_STREAMS_VERSION	"v1.5"
 
 #define RD_SUCCESS		0
 #define RD_FAILED		1
@@ -466,6 +466,7 @@ void processTCPrequest
 	CRTMP *rtmp = new CRTMP();
 	uint32_t dSeek = 0; // can be used to start from a later point in the stream
 	uint32_t dLength;    // desired length of stream to play, 0 otherwise
+	unsigned long counterInc = 102400;
 
 	// reset RTMP options to defaults specified upon invokation of streams
 	RTMP_REQUEST req;
@@ -632,6 +633,12 @@ void processTCPrequest
         if(dLength != 0)
                 LogPrintf("For duration: %.3f sec\n", (double)dLength/1000.0);
 
+	// how often to update progress counter
+	if (req.bLiveStream)
+		counterInc = 20480;
+	else
+		counterInc = 204800;
+
         Log(LOGDEBUG, "Setting buffer time to: %.3f sec", (double)req.bufferTime/1000.0);
         rtmp->SetBufferMS(req.bufferTime);
 
@@ -657,6 +664,7 @@ void processTCPrequest
     	else 
 	{
 		unsigned long size = 0;
+		unsigned long lastSize = 0;
 		double percent = 0;
 	        double duration = 0.0;
 
@@ -693,36 +701,41 @@ void processTCPrequest
 				}
 
 				size += nRead;
-        
-                        	//LogPrintf("write %dbytes (%.1f kB)\n", nRead, nRead/1024.0);
-                        	if(duration <= 0) // if duration unknown try to get it from the stream (onMetaData)
-                                	duration = rtmp->GetDuration();
 
-                        	if(duration > 0) {
-                                	percent = ((double)(dSeek+req.nTimeStamp)) / (duration*1000.0)*100.0;
-                                	percent = round(percent*10.0)/10.0;
-                                	LogPrintf("\r%.3f KB / %.2f sec (%.1f%%)", (double)size/1024.0, (double)(req.nTimeStamp)/1000.0, percent);
-                        	} else {
-                                	LogPrintf("\r%.3f kB / %.2f sec", (double)size/1024.0, (double)(req.nTimeStamp)/1000.0);
-                        	}
-                	}
-                	#ifdef _DEBUG
-                	else { Log(LOGDEBUG, "zero read!"); }
-                	#endif	
+				//LogPrintf("write %dbytes (%.1f kB)\n", nRead, nRead/1024.0);
+				if(duration <= 0) // if duration unknown try to get it from the stream (onMetaData)
+					duration = rtmp->GetDuration();
 
-        		// Force clean close if a specified stop offset is reached
-        		if (req.dStopOffset && req.nTimeStamp >= req.dStopOffset) {
-        		        LogPrintf("\nStop offset has been reached at %.3f sec\n", (double)req.dStopOffset/1000.0);
-        		        nRead = 0;
-        		        rtmp->Close();
-        		}
+				if(duration <= 0) {
+					if ( lastSize + counterInc <= size ) {
+						LogPrintf("\r%.3f kB / %.2f sec", (double)size/1024.0, (double)(req.nTimeStamp)/1000.0);
+						lastSize = size;
+					}
+				} else {
+					percent = (double)(dSeek+req.nTimeStamp)/(duration*10.0);
+					if ( lastSize + counterInc <= size ) {
+						LogPrintf("\r%.3f kB / %.2f sec (%.1f%%)", (double)size/1024.0, (double)(req.nTimeStamp)/1000.0, percent);
+						lastSize = size;
+					}
+				}
+			}
+			#ifdef _DEBUG
+			else { Log(LOGDEBUG, "zero read!"); }
+			#endif	
+
+			// Force clean close if a specified stop offset is reached
+			if (req.dStopOffset && req.nTimeStamp >= req.dStopOffset) {
+				LogPrintf("\nStop offset has been reached at %.3f sec\n", (double)req.dStopOffset/1000.0);
+				nRead = 0;
+				rtmp->Close();
+			}
 
 		} while(server->state == STREAMING_IN_PROGRESS && nRead > -1 && rtmp->IsConnected() && nWritten >= 0);
 	}
 cleanup:
 	LogPrintf("Closing connection... ");
-        rtmp->Close();
-        LogPrintf("done!\n\n");
+	rtmp->Close();
+	LogPrintf("done!\n\n");
 
 quit:
 	if(buffer) {

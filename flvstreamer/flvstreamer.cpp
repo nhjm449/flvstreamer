@@ -37,11 +37,11 @@
 #include "AMFObject.h"
 #include "parseurl.h"
 
-int debuglevel = 1;
+int debuglevel = LOGERROR;
 
 using namespace RTMP_LIB;
 
-#define RTMPDUMP_VERSION	"v1.8h"
+#define RTMPDUMP_VERSION	"v1.8i"
 
 #define RD_SUCCESS		0
 #define RD_FAILED		1
@@ -468,6 +468,7 @@ int main(int argc, char **argv)
 	int port = -1;
 	int protocol = RTMP_PROTOCOL_UNDEFINED;
 	bool bLiveStream = false; // is it a live stream? then we can't seek/resume
+	bool bHashes = false; // display byte counters not hashes by default
 
 	long int timeout = 300; // timeout connection after 300 seconds
 	uint32_t dStartOffset = 0; // seek position in non-live mode
@@ -523,13 +524,14 @@ int main(int argc, char **argv)
 		{"subscribe",1,NULL, 'd'},
 		{"start",   1, NULL, 'A'},
 		{"stop",    1, NULL, 'B'},
+		{"hashes",  1, NULL, '#'},
 		{"debug",   0, NULL, 'z'},
 		{"quiet",   0, NULL, 'q'},
 		{"verbose", 0, NULL, 'x'},
 		{0,0,0,0}
 	};
 
-	while((opt = getopt_long(argc, argv, "hveqxzr:s:t:p:a:f:o:u:n:c:l:y:m:k:d:A:B:", longopts, NULL)) != -1) {
+	while((opt = getopt_long(argc, argv, "hveqxzr:s:t:p:a:f:o:u:n:c:l:y:m:k:d:A:B:#", longopts, NULL)) != -1) {
 		switch(opt) {
 			case 'h':
 				LogPrintf("\nThis program streams the flv media content from an rtmp server to stdout.\n\n");
@@ -552,6 +554,7 @@ int main(int argc, char **argv)
 				LogPrintf("--timeout|-m num        Timeout connection num seconds (default: %lu)\n", timeout);
 				LogPrintf("--start|-A num          Start at num seconds into stream (not valid when using --live)\n");
 				LogPrintf("--stop|-B num           Stop at num seconds into stream (or duration of live stream to play)\n");
+				LogPrintf("--hashes|-#             Display progress with hashes, not with the byte counter\n");
 				LogPrintf("--buffer|-b             Buffer time in milliseconds (default: %lu), this option makes only sense in stdout mode (-o -)\n", 
 					bufferTime);
 				LogPrintf("--skip|-k num           Skip num keyframes when looking for last keyframe to resume from. Useful if resume fails (default: %d)\n\n",
@@ -664,6 +667,9 @@ int main(int argc, char **argv)
 			case 'B':
 				dStopOffset = int(atof(optarg)*1000.0);
 				break;
+			case '#':
+				bHashes = true;
+				break;
 			case 'q':
 				debuglevel = LOGCRIT;
 				break;
@@ -748,6 +754,7 @@ int main(int argc, char **argv)
 
 	unsigned long size = 0;
 	unsigned long lastSize = 0;
+	unsigned long counterInc = 102400;
         uint32_t timestamp = 0;
 
 	// ok, we have to get the timestamp of the last keyframe (only keyframes are seekable) / last audio frame (audio only streams) 
@@ -1070,6 +1077,14 @@ start:
         if (dLength > 0)
                 LogPrintf("For duration: %.3f sec\n", (double)dLength/1000.0);
 
+	// how often to update progress counter
+	if (bLiveStream)
+		counterInc = 25600;
+	else if (bHashes)
+		counterInc = 102400;
+	else
+		counterInc = 204800;
+
 	// write FLV header if not resuming
 	if(!bResume) {
 		nRead = WriteHeader(&buffer, bufferSize);
@@ -1103,25 +1118,37 @@ start:
 			if(duration <= 0) // if duration unknown try to get it from the stream (onMetaData)
 				duration = rtmp->GetDuration();
 
-			if(duration > 0) {
+			if(duration <= 0) {
+				// counter without percent
+				if ( lastSize + counterInc <= size ) {
+					if (bHashes)
+						LogPrintf("#");
+					else
+						LogPrintf("\r%.3f kB / %.2f sec", (double)size/1024.0, (double)(timestamp)/1000.0);
+					lastSize = size;
+				}
+
+			} else {
 				// make sure we claim to have enough buffer time!
 				if(!bOverrideBufferTime && bufferTime < (duration*1000.0)) {
 					bufferTime = (uint32_t)(duration*1000.0)+5000; // extra 5sec to make sure we've got enough
-					
 					Log(LOGDEBUG, "Detected that buffer time is less than duration, resetting to: %dms", bufferTime);
 					rtmp->SetBufferMS(bufferTime);
 					rtmp->UpdateBufferMS();
 				}
-				percent = round( ((double)timestamp) / (duration*1000.0)*100.0*10.0)/10.0;
-				if ( lastSize <= size - 204800 ) {
-        				LogPrintf("\r%.3f kB / %.2f sec (%.1f%%)", (double)size/1024.0, (double)(timestamp)/1000.0, percent);
-        				lastSize = size;
-                                }
-			} else {
-				if ( lastSize <= size - 204800 ) {
-				        LogPrintf("\r%.3f kB / %.2f sec", (double)size/1024.0, (double)(timestamp)/1000.0);
-        				lastSize = size;
-                                }
+				// counter with percent
+				percent = (double)timestamp/(duration*10.0);
+				if (bHashes) {
+					if ( lastSize + 1 <= percent ) {
+						LogPrintf("#");
+						lastSize = percent;
+					}
+				} else {
+					if ( lastSize + counterInc <= size ) {
+						LogPrintf("\r%.3f kB / %.2f sec (%.1f%%)", (double)size/1024.0, (double)(timestamp)/1000.0, percent);
+						lastSize = size;
+					}
+				}
 			}
 		}
 		#ifdef _DEBUG
@@ -1136,6 +1163,7 @@ start:
 		}
 		
 	} while(!bCtrlC && nRead > -1 && rtmp->IsConnected());
+	LogPrintf("\n");
 
 	// finalize header by writing the correct dataType (video, audio, video+audio)
 	if(!bResume && dataType != 0x5 && !bStdoutMode) {
@@ -1145,7 +1173,7 @@ start:
 	}
 
 	if(bResume && nRead == -2) {
-		LogPrintf("\rCouldn't resume FLV file, try --skip %d\n\n", nSkipKeyFrames+1);
+		Log(LOGERROR, "Couldn't resume FLV file, try --skip %d", nSkipKeyFrames+1);
 		nStatus = RD_FAILED;
 		goto clean;
 	}
@@ -1153,19 +1181,19 @@ start:
 	// If duration is available then assume the download is complete if > 99.9%
 	if (bLiveStream == false) {
 		if (duration > 0 && percent > 99.9) {
-			LogPrintf("\rDownload complete\n");
+			LogPrintf("Download complete\n");
 			nStatus = RD_SUCCESS;
 			goto clean;
 		//} else if ( bCtrlC || nRead != (-1) ) {
 		} else {
-			LogPrintf("\rDownload may be incomplete (downloaded about %.2f%%), try --resume\n", percent);
+			LogPrintf("Download may be incomplete (downloaded about %.2f%%), try --resume\n", percent);
 			nStatus = RD_INCOMPLETE;
 		}
 	}
 
 	// If nRead is zero then assume complete
 	if(nRead == 0) {
-	        LogPrintf("\rDownload complete\n");
+	        LogPrintf("Download complete\n");
 	        nStatus = RD_SUCCESS;
 	        goto clean;
 	}
@@ -1176,7 +1204,7 @@ start:
 
         //Log(LOGDEBUG, "nStatus: %d, nRead: %d", nStatus, nRead);
 clean:
-	LogPrintf("\rClosing connection.\n");
+	Log(LOGDEBUG, "Closing connection.");
 	rtmp->Close();
 	//LogPrintf("done!\n\n");
 
