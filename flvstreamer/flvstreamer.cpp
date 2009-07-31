@@ -1058,18 +1058,16 @@ start:
 	#endif*/
 
 	timestamp  = dSeek;
-	if(dSeek != 0)
-		LogPrintf("Continuing at: %.3f sec\n", (double)timestamp/1000.0);
 
 	// print initial status
 	// Workaround to exit with 0 if the file is fully (> 99.9%) downloaded
 	if( duration > 0 && (double)timestamp >= (double)duration*999.0 ) {
-                LogPrintf("Already Completed at: %.3f sec Duration=%.3f sec\n", (double)timestamp/1000.0, (double)duration);
+                LogPrintf("Already Completed at: %.3f sec Duration=%.3f sec\n", (double)timestamp/1000.0, (double)timestamp/1000.0);
                 goto clean;
         } else if(duration > 0) {
 		percent = ((double)timestamp) / (duration*1000.0)*100.0;
                 percent = round(percent*10.0)/10.0;
-                LogPrintf("Starting download at: %.3f kB / %.3f sec (%.1f%%)\n", (double)size/1024.0, (double)duration, percent);
+                LogPrintf("Starting download at: %.3f kB / %.3f sec (%.1f%%)\n", (double)size/1024.0, (double)timestamp/1000.0, percent);
         } else {
                 LogPrintf("Starting download at: %.3f kB\n", (double)size/1024.0);
         }
