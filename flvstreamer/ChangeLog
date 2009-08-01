@@ -9,6 +9,8 @@ Copyright 2008-2009 Andrej Stepanchuk, The Flvstreamer Team; Distributed under t
 
 - Fixed minor time offset reporting bug
 
+- Always exit as incomplete if Ctrl-C is pressed
+
 30 Jul 2009, v1.8h
 
 - Download progress updates less frequently which puts less CPU load an some systems.

@@ -423,7 +423,7 @@ bool bCtrlC = false;
 
 void sigIntHandler(int sig) {
 	bCtrlC = true;
-	LogPrintf("Caught signal: %d, cleaning up, just a second...\n", sig);
+	LogPrintf("\nCaught signal: %d, cleaning up, just a second...\n", sig);
 	signal(SIGINT, SIG_DFL);
 }
 
@@ -1139,7 +1139,7 @@ start:
 				if (bHashes) {
 					if ( lastSize + 1 <= percent ) {
 						LogPrintf("#");
-						lastSize = percent;
+						lastSize = (unsigned long)percent;
 					}
 				} else {
 					if ( lastSize + counterInc <= size ) {
@@ -1163,6 +1163,12 @@ start:
 	} while(!bCtrlC && nRead > -1 && rtmp->IsConnected());
 	LogPrintf("\n");
 
+	// Always fail when Ctrl-C is pressed
+	if ( bCtrlC) {
+	        nStatus = RD_INCOMPLETE;
+	        goto clean;
+	}
+
 	// finalize header by writing the correct dataType (video, audio, video+audio)
 	if(!bResume && dataType != 0x5 && !bStdoutMode) {
 		Log(LOGDEBUG, "Writing data type: %02X", dataType);
@@ -1182,7 +1188,6 @@ start:
 			LogPrintf("Download complete\n");
 			nStatus = RD_SUCCESS;
 			goto clean;
-		//} else if ( bCtrlC || nRead != (-1) ) {
 		} else {
 			LogPrintf("Download may be incomplete (downloaded about %.2f%%), try --resume\n", percent);
 			nStatus = RD_INCOMPLETE;
