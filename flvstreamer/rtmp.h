@@ -197,9 +197,9 @@ class CRTMP
       char *m_pBuffer;      // data read from socket
       char *m_pBufferStart; // pointer into m_pBuffer of next byte to process
       int  m_nBufferSize;   // number of unprocessed bytes in buffer
-      RTMPPacket m_vecChannelsIn[64];
-      RTMPPacket m_vecChannelsOut[64];
-      int  m_channelTimestamp[64]; // abs timestamp of last packet
+      RTMPPacket m_vecChannelsIn[65600];
+      RTMPPacket m_vecChannelsOut[65600];
+      int  m_channelTimestamp[65600]; // abs timestamp of last packet
       
       double m_fDuration; // duration of stream in seconds
   };

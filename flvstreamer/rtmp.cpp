@@ -1099,6 +1099,28 @@ bool CRTMP::ReadPacket(RTMPPacket &packet)
 
   packet.m_headerType = (type & 0xc0) >> 6;
   packet.m_nChannel = (type & 0x3f);
+  if ( packet.m_nChannel == 0 )
+  {
+    if (ReadN(&type,1) != 1)
+    {
+      Log(LOGERROR, "%s, failed to read RTMP packet header 2nd byte", __FUNCTION__);
+      return false;
+    } 
+    packet.m_nChannel = (unsigned)type;
+    packet.m_nChannel += 64;
+  } else if ( packet.m_nChannel == 1 )
+  {
+    char t[2];
+    int tmp;
+    if (ReadN(t,2) != 2)
+    {
+      Log(LOGERROR, "%s, failed to read RTMP packet header 3rd byte", __FUNCTION__);
+      return false;
+    } 
+    tmp = (((unsigned)t[0])<<8) + (unsigned)t[1];
+    packet.m_nChannel = tmp + 64;
+    Log(LOGDEBUG, "%s, m_nChannel: %0x", __FUNCTION__, packet.m_nChannel);
+  }
 
   int nSize = packetSize[packet.m_headerType];
   
