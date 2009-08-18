@@ -26,6 +26,8 @@
 #include <getopt.h>
 
 #ifdef WIN32
+#define fseeko fseeko64
+#define ftello ftello64
 #include <winsock.h>
 #include <stdio.h>
 #include <io.h>
@@ -190,7 +192,7 @@ int WriteStream(
 					}
 				}
 
-				// hande FLV streams, even though the server resends the keyframe as an extra video packet
+				// handel FLV streams, even though the server resends the keyframe as an extra video packet
 				// it is also included in the first FLV stream chunk and we have to compare it and
 				// filter it out !!
 				//
@@ -765,8 +767,8 @@ int main(int argc, char **argv)
 			goto start; // file does not exist, so go back into normal mode
 		}
 
-		fseek(file, 0, SEEK_END);
-		size = ftell(file);
+		fseeko(file, 0, SEEK_END);
+		size = ftello(file);
 		fseek(file, 0, SEEK_SET);
 
 		if(size > 0) {
@@ -795,7 +797,7 @@ int main(int argc, char **argv)
 				Log(LOGDEBUG, "Resuming audio only stream!");
 	
 			uint32_t dataOffset = RTMP_LIB::CRTMP::ReadInt32(buffer+5);
-			fseek(file, dataOffset, SEEK_SET);
+			fseeko(file, dataOffset, SEEK_SET);
 
 			if(fread(buffer, 1, 4, file) != 4) {
 				Log(LOGERROR, "Invalid FLV file: missing first prevTagSize!");
@@ -812,14 +814,14 @@ int main(int argc, char **argv)
 			bool bFoundMetaHeader = false;
 
 			while(pos < size-4 && !bFoundMetaHeader) {
-				fseek(file, pos, SEEK_SET);
+				fseeko(file, pos, SEEK_SET);
 				if(fread(buffer, 1, 4, file)!=4)
 					break;
 
 				uint32_t dataSize = RTMP_LIB::CRTMP::ReadInt24(buffer+1);
 				
 				if(buffer[0] == 0x12) {
-					fseek(file, pos+11, SEEK_SET);
+					fseeko(file, pos+11, SEEK_SET);
 					if(fread(buffer, 1, dataSize, file) != dataSize)
 						break;
 					
@@ -871,7 +873,7 @@ skipkeyframe:
 						nStatus = RD_FAILED; goto clean;
 					}
 
-					fseek(file, size-tsize-4, SEEK_SET);
+					fseeko(file, size-tsize-4, SEEK_SET);
 					if(fread(buffer, 1, 4, file) != 4) {
 						Log(LOGERROR, "Couldn't read prevTagSize from file!");
 						nStatus = RD_FAILED; goto clean;
@@ -892,7 +894,7 @@ skipkeyframe:
 					tsize += prevTagSize+4;
 
 					// read header
-					fseek(file, size-tsize, SEEK_SET);
+					fseeko(file, size-tsize, SEEK_SET);
 					if(fread(buffer, 1, 12, file) != 12) {
 						Log(LOGERROR, "Couldn't read header!");
 						nStatus=RD_FAILED; goto clean;
@@ -928,7 +930,7 @@ skipkeyframe:
 				nInitialFrameSize = prevTagSize-11;
 				initialFrame = (char *)malloc(nInitialFrameSize);
 				
-				fseek(file, size-tsize+11, SEEK_SET);
+				fseeko(file, size-tsize+11, SEEK_SET);
 				if(fread(initialFrame, 1, nInitialFrameSize, file) != nInitialFrameSize) {
 					Log(LOGERROR, "Couldn't read last keyframe, aborting!");
 					nStatus=RD_FAILED;
@@ -951,13 +953,13 @@ skipkeyframe:
 
 			/*
 			// now read the timestamp of the frame before the seekable keyframe:
-			fseek(file, size-tsize-4, SEEK_SET);
+			fseeko(file, size-tsize-4, SEEK_SET);
 			if(fread(buffer, 1, 4, file) != 4) {
 				Log(LOGERROR, "Couldn't read prevTagSize from file!");
 				goto start;
 			}
 			uint32_t prevTagSize = RTMP_LIB::CRTMP::ReadInt32(buffer);
-			fseek(file, size-tsize-4-prevTagSize+4, SEEK_SET);
+			fseeko(file, size-tsize-4-prevTagSize+4, SEEK_SET);
 			if(fread(buffer, 1, 4, file) != 4) {
                                 Log(LOGERROR, "Couldn't read previous timestamp!");
                                 goto start;
@@ -977,7 +979,7 @@ skipkeyframe:
 			{
 				// seek to position after keyframe in our file (we will ignore the keyframes resent by the server
 				// since they are sent a couple of times and handling this would be a mess)
-				fseek(file, size-tsize+prevTagSize+4, SEEK_SET);
+				fseeko(file, size-tsize+prevTagSize+4, SEEK_SET);
 			
 				// make sure the WriteStream doesn't write headers and ignores all the 0ms TS packets
 				// (including several meta data headers and the keyframe we seeked to)
@@ -1172,7 +1174,7 @@ start:
 	// finalize header by writing the correct dataType (video, audio, video+audio)
 	if(!bResume && dataType != 0x5 && !bStdoutMode) {
 		Log(LOGDEBUG, "Writing data type: %02X", dataType);
-		fseek(file, 4, SEEK_SET);
+		fseeko(file, 4, SEEK_SET);
 		fwrite(&dataType, sizeof(unsigned char), 1, file);
 	}
 

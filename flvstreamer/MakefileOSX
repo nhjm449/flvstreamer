@@ -2,9 +2,9 @@ CC=gcc
 CXX=g++
 LD=ld
 
-CFLAGS=-Wall -arch ppc -arch i386
-CXXFLAGS=-Wall -arch ppc -arch i386
-LDFLAGS=-Wall -arch ppc -arch i386
+CFLAGS=-Wall -arch ppc -arch i386 -D_FILE_OFFSET_BITS=64
+CXXFLAGS=-Wall -arch ppc -arch i386 -D_FILE_OFFSET_BITS=64
+LDFLAGS=-Wall -arch ppc -arch i386 -D_FILE_OFFSET_BITS=64
 
 all: flvstreamer
 

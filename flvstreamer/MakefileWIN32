@@ -2,15 +2,14 @@ CC=mingw32-gcc
 CXX=mingw32-g++
 LD=mingw32-ld
 
-CFLAGS=-Wall
-
-CXXFLAGS=
-LDFLAGS=
+CFLAGS=-Wall -D_FILE_OFFSET_BITS=64
+CXXFLAGS=-D_FILE_OFFSET_BITS=64
+LDFLAGS=-D_FILE_OFFSET_BITS=64
 
 all: flvstreamer
 
 clean:
-	rm -f *.o
+	del *.o
 
 flvstreamer: bytes.o log.o rtmp.o AMFObject.o rtmppacket.o flvstreamer.o parseurl.o handshake.o
 	$(CXX) $(LDFLAGS) $^ -o $@_win32.exe -lws2_32 -lwinmm -lgdi32

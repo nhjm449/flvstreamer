@@ -1,9 +1,11 @@
 FLVStreamer
 Copyright 2008-2009 Andrej Stepanchuk and The Flvstreamer Team; Distributed under the GPL v2
 
-07 Aug 2009, v1.8j
+18 Aug 2009, v1.8j
 
 - Allow chunk stream ids upto 3 bytes long
+
+- Fixed >2GB file handling
 
 31 Jul 2009, v1.8i
 

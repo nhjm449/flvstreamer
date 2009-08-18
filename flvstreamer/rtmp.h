@@ -131,7 +131,7 @@ class CRTMP
 
       static short ReadInt16(const char *data);
       static int  ReadInt24(const char *data);
-      static int  ReadInt32(const char *data);
+      static unsigned int  ReadInt32(const char *data);
       static std::string ReadString(const char *data);
       static bool ReadBool(const char *data);
       static double ReadNumber(const char *data);

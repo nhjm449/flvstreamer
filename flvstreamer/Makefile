@@ -2,9 +2,9 @@ CC=gcc
 CXX=g++
 LD=ld
 
-CFLAGS=-Wall
-CXXFLAGS=-Wall
-LDFLAGS=-Wall
+CFLAGS=-Wall -D_FILE_OFFSET_BITS=64
+CXXFLAGS=-Wall -D_FILE_OFFSET_BITS=64
+LDFLAGS=-Wall -D_FILE_OFFSET_BITS=64
 
 all: flvstreamer
 

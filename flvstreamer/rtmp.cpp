@@ -1221,7 +1221,7 @@ int  CRTMP::ReadInt24(const char *data)
 }
 
 // big-endian 32bit integer
-int  CRTMP::ReadInt32(const char *data)
+unsigned int  CRTMP::ReadInt32(const char *data)
 {
   int val;
   memcpy(&val, data, sizeof(int));
