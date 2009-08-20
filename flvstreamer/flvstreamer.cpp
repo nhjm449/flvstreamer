@@ -1165,17 +1165,17 @@ start:
 	} while(!bCtrlC && nRead > -1 && rtmp->IsConnected());
 	LogPrintf("\n");
 
-	// Always fail when Ctrl-C is pressed
-	if ( bCtrlC) {
-	        nStatus = RD_INCOMPLETE;
-	        goto clean;
-	}
-
 	// finalize header by writing the correct dataType (video, audio, video+audio)
 	if(!bResume && dataType != 0x5 && !bStdoutMode) {
 		Log(LOGDEBUG, "Writing data type: %02X", dataType);
 		fseeko(file, 4, SEEK_SET);
 		fwrite(&dataType, sizeof(unsigned char), 1, file);
+	}
+
+	// Always fail when Ctrl-C is pressed
+	if ( bCtrlC) {
+	        nStatus = RD_INCOMPLETE;
+	        goto clean;
 	}
 
 	if(bResume && nRead == -2) {
