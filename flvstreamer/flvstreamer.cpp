@@ -427,8 +427,12 @@ bool bCtrlC = false;
 void sigIntHandler(int sig) {
 	bCtrlC = true;
 	LogPrintf("\nCaught signal: %d, cleaning up, just a second...\n", sig);
-	// restore handler to default
-	signal(sig, SIG_DFL);
+	// restore all handlers to default
+	signal(SIGHUP, SIG_DFL);
+	signal(SIGINT, SIG_DFL);
+	signal(SIGPIPE, SIG_DFL);
+	signal(SIGTERM, SIG_DFL);
+	signal(SIGQUIT, SIG_DFL);
 }
 
 //#define _DEBUG_TEST_PLAYSTOP
@@ -491,6 +495,7 @@ int main(int argc, char **argv)
 
 	char DEFAULT_FLASH_VER[]  = "LNX 10,0,22,87";
 	
+	signal(SIGHUP, sigIntHandler);
 	signal(SIGINT, sigIntHandler);
 	signal(SIGPIPE, sigIntHandler);
 	signal(SIGTERM, sigIntHandler);
@@ -1231,6 +1236,7 @@ clean:
 	if(netstackdump_read != 0)
                 fclose(netstackdump_read);	
 #endif
+        Log(LOGDEBUG, "Exit code: %d\n", nStatus);
 	return nStatus;
 }
 
