@@ -1,9 +1,15 @@
-FLVStreamer
-Copyright 2008-2009 Andrej Stepanchuk and The Flvstreamer Team; Distributed under the GPL v2
+FLVStreamer                                                                                       
+Copyright (C) 2008-2009 Andrej Stepanchuk                                                      
+Copyright (C) 2009 The Flvstreamer Team                                                        
+Distributed under the GPL v2
 
-20 Aug 2009, 1.8k
+07 Sep 2009, 1.8k
 
 - Fixed bug introduced in v1.8i where writing flv dataType did not happen if ctrl-c was pressed
+
+- Handle more signals to reduce risk of unresumable/corrupted partially streamed files
+
+- Disable disk write buffering to reduce risk of unresumable/corrupted partially streamed files
 
 18 Aug 2009, v1.8j
 

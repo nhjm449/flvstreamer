@@ -1,5 +1,6 @@
 /*  FLVStreamer
- *  Copyright (C) 2009 Andrej Stepanchuk, The Flvstreamer Team
+ *	Copyright (C) 2008-2009 Andrej Stepanchuk
+ *	Copyright (C) 2009 The Flvstreamer Team
  *
  *  This Program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -43,7 +44,7 @@ int debuglevel = LOGERROR;
 
 using namespace RTMP_LIB;
 
-#define RTMPDUMP_VERSION	"v1.8j"
+#define RTMPDUMP_VERSION	"v1.8k"
 
 #define RD_SUCCESS		0
 #define RD_FAILED		1
@@ -426,7 +427,8 @@ bool bCtrlC = false;
 void sigIntHandler(int sig) {
 	bCtrlC = true;
 	LogPrintf("\nCaught signal: %d, cleaning up, just a second...\n", sig);
-	signal(SIGINT, SIG_DFL);
+	// restore handler to default
+	signal(sig, SIG_DFL);
 }
 
 //#define _DEBUG_TEST_PLAYSTOP
@@ -490,6 +492,9 @@ int main(int argc, char **argv)
 	char DEFAULT_FLASH_VER[]  = "LNX 10,0,22,87";
 	
 	signal(SIGINT, sigIntHandler);
+	signal(SIGPIPE, sigIntHandler);
+	signal(SIGTERM, sigIntHandler);
+	signal(SIGQUIT, sigIntHandler);
 
 	// Check for --quiet option before printing any output
 	int index = 0;
@@ -1001,6 +1006,8 @@ start:
 		else
 		{
 			file = fopen(flvFile, "wb");
+			// No buffering
+			setbuf (file, NULL);
 			if(file == 0) {
                         	LogPrintf("Failed to open file!\n");
                         	return RD_FAILED;
