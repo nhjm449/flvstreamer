@@ -569,7 +569,7 @@ int main(int argc, char **argv)
 				LogPrintf("--quiet|-q              Supresses all command output.\n");
 				LogPrintf("--verbose|-x            Verbose command output.\n");
 				LogPrintf("--debug|-z              Debug level command output.\n");
-				LogPrintf("If you don't pass parameters for swfUrl, pageUrl, app or auth these propertiews will not be included in the connect ");
+				LogPrintf("If you don't pass parameters for swfUrl, pageUrl, app or auth these properties will not be included in the connect ");
 				LogPrintf("packet.\n\n");
 				return RD_SUCCESS;
 			case 'k':
