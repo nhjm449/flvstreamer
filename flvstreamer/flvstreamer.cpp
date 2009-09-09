@@ -427,12 +427,12 @@ bool bCtrlC = false;
 void sigIntHandler(int sig) {
 	bCtrlC = true;
 	LogPrintf("\nCaught signal: %d, cleaning up, just a second...\n", sig);
-	// restore all handlers to default
-	signal(SIGHUP, SIG_DFL);
-	signal(SIGINT, SIG_DFL);
-	signal(SIGPIPE, SIG_DFL);
-	signal(SIGTERM, SIG_DFL);
-	signal(SIGQUIT, SIG_DFL);
+	// ignore all these signals now and let the connection close
+	signal(SIGHUP, SIG_IGN);
+	signal(SIGINT, SIG_IGN);
+	signal(SIGPIPE, SIG_IGN);
+	signal(SIGTERM, SIG_IGN);
+	signal(SIGQUIT, SIG_IGN);
 }
 
 //#define _DEBUG_TEST_PLAYSTOP
