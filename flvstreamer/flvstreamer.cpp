@@ -33,6 +33,12 @@
 #include <stdio.h>
 #include <io.h>
 #include <fcntl.h>
+//signals: MINGW32 doesn't define these
+#define SIGHUP 1
+#define SIGQUIT 1
+#define SIGPIPE 3
+#define SIGALRM 13
+#define SIGUSR1 16
 #endif
 
 #include "rtmp.h"

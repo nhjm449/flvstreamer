@@ -11,6 +11,8 @@ Distributed under the GPL v2
 
 - Disable disk write buffering to reduce risk of unresumable/corrupted partially streamed files
 
+- flush all log writes by default
+
 18 Aug 2009, v1.8j
 
 - Allow chunk stream ids upto 3 bytes long

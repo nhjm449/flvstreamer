@@ -48,9 +48,9 @@ void LogPrintf(const char *format, ...)
           return;
 
         fprintf(fmsg, "%s", str);
-	#ifdef _DEBUG
+//	#ifdef _DEBUG
 	fflush(fmsg);
-	#endif
+//	#endif
 }
 
 void Log(int level, const char *format, ...)
@@ -68,9 +68,9 @@ void Log(int level, const char *format, ...)
         if ( level <= debuglevel )
           fprintf(fmsg, "\r%s: %s\n", level==LOGDEBUG?"DEBUG":(level==LOGERROR?"ERROR":(level==LOGWARNING?"WARNING":(level==LOGCRIT?"CRIT":"INFO"))), str);
   
-	#ifdef _DEBUG
+//	#ifdef _DEBUG
 	fflush(fmsg);
-	#endif
+//	#endif
 }
 
 void LogHex(const char *data, unsigned long len)
