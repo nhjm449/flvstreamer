@@ -15,6 +15,10 @@ For Mac OSX to create a universal binary (intel and ppc):
 
  $ make -f MakefileOSX flvstreamer
 
+For WIN32 using cygwin:
+
+ $ make -f MakefileCYGWIN
+
 To cross compile flvstreamer for WIN32 you can use MinGW ( http://www.mingw.org ):
 
  $ C:\MinGW\bin\mingw32-make.exe -f MakefileWIN32
