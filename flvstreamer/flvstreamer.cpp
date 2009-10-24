@@ -50,7 +50,7 @@ int debuglevel = LOGERROR;
 
 using namespace RTMP_LIB;
 
-#define RTMPDUMP_VERSION	"v1.8k"
+#define RTMPDUMP_VERSION	"v1.8l"
 
 #define RD_SUCCESS		0
 #define RD_FAILED		1
@@ -121,6 +121,7 @@ int WriteStream(
 		unsigned int len, 		// length of buffer if preallocated
 		uint32_t *tsm, 			// pointer to timestamp, will contain timestamp of last video packet returned
 		bool bResume, 		        // resuming mode, will not write FLV header and compare metaHeader and first kexframe
+		bool bLiveStream, 		// live mode, will not report absolute timestamps
 		uint32_t nResumeTS,		// resume keyframe timestamp
 		char *metaHeader, 		// pointer to meta header (if bResume == TRUE)
 		uint32_t nMetaHeaderSize,	// length of meta header, if zero meta header check omitted (if bResume == TRUE)
@@ -160,7 +161,7 @@ int WriteStream(
 			return 0;
 		}
 #ifdef _DEBUG
-		Log(LOGDEBUG, "type: %02X, size: %d, TS: %d ms, abs TS: %d", packet.m_packetType, nPacketLen, packet.m_nTimeStamp, packet.m_hasAbsTimestamp);
+		Log(LOGDEBUG, "\ntype: %02X, size: %d, TS: %d ms, abs TS: %d", packet.m_packetType, nPacketLen, packet.m_nTimeStamp, packet.m_hasAbsTimestamp);
 		if(packet.m_packetType == 0x09)
 			Log(LOGDEBUG, "frametype: %02X", (*packetBody & 0xf0));
 #endif
@@ -322,6 +323,13 @@ stopKeyframeSearch:
 
 			nTimeStamp = nResumeTS + packet.m_nTimeStamp;
 			prevTagSize = 11 + nPacketLen;
+#ifdef _DEBUG
+                        LogPrintf("\nDEBUG: type: %02X, size: %d, pktTS: %dms, TS: %dms, resumeTS: %dms, abs_TS: %d", packet.m_packetType, nPacketLen, packet.m_nTimeStamp, nTimeStamp, nResumeTS, packet.m_hasAbsTimestamp);
+#endif
+			// In live streams this nTimeStamp can contain an absolute TS, so only report the relative one from the type 16
+                        // update ext timestamp with this relative offset
+        		if(tsm && bLiveStream)
+				*tsm = packet.m_nTimeStamp;
 
 			*ptr = packet.m_packetType;
 			ptr++;
@@ -366,6 +374,13 @@ stopKeyframeSearch:
                                 nTimeStamp = CRTMP::ReadInt24(packetBody+pos+4);
                                 nTimeStamp |= (packetBody[pos+7]<<24);
 
+#ifdef _DEBUG
+                                LogPrintf("\nDEBUG: type: %02X, size: %d, pktTS: %dms, TS: %dms, abs_TS: %d", packet.m_packetType, nPacketLen, packet.m_nTimeStamp, nTimeStamp, packet.m_hasAbsTimestamp);
+#endif
+        			// In non-live this nTimeStamp can contain an absolute TS
+                                // update ext timestamp with this absolute offset
+                		if(tsm && ! bLiveStream)
+	        			*tsm = nTimeStamp;
 				/*
 				CRTMP::EncodeInt24(ptr+pos+4, nTimeStamp);
 				ptr[pos+7] = (nTimeStamp>>24)&0xff;//*/
@@ -411,9 +426,6 @@ stopKeyframeSearch:
 			CRTMP::EncodeInt32(ptr, prevTagSize);
 			//ptr += 4;
 		}
-
-		if(tsm)
-			*tsm = nTimeStamp;
 
                 // Return 0 if this was completed nicely with invoke message Play.Stop or Play.Complete
                 if (rtnGetNextMediaPacket == 2) {
@@ -1121,7 +1133,7 @@ start:
 	}
 	do
 	{
-		nRead = WriteStream(rtmp, &buffer, bufferSize, &timestamp, bResume, dSeek, metaHeader, nMetaHeaderSize, initialFrame, initialFrameType, nInitialFrameSize, &dataType);
+		nRead = WriteStream(rtmp, &buffer, bufferSize, &timestamp, bResume, bLiveStream, dSeek, metaHeader, nMetaHeaderSize, initialFrame, initialFrameType, nInitialFrameSize, &dataType);
 
 		//LogPrintf("nRead: %d\n", nRead);
 		if(nRead > 0) {

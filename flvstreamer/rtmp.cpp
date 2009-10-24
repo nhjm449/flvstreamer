@@ -516,8 +516,9 @@ bool CRTMP::SendConnectPacket()
   // TODO: need to send pageUrl with AMF type undefined 0x06 here if pageurl isn't specified
 
   //empty object
-  *enc=0x09; enc++;
-  *enc=0x03; enc++;
+// Causes some probs?
+//  *enc=0x09; enc++;
+//  *enc=0x03; enc++;
 
   //enc += EncodeNumber(enc, "objectEncoding", 3.0); // use AMF3 objects, not supported yet
   enc += 2; // end of object - 0x00 0x00 0x09
@@ -1149,6 +1150,12 @@ bool CRTMP::ReadPacket(RTMPPacket &packet)
   if (nSize >= 6)
   {
     packet.m_nBodySize = ReadInt24(header + 3);
+    // for now, skip over any very large body size allocations - seems like packet corruption or a parsing bug
+    if (packet.m_nBodySize > 640000)
+    {
+      Log(LOGDEBUG, "%s, cannot allocate oversized packet (BodySize = %lu bytes)", __FUNCTION__, packet.m_nBodySize);
+      return false;
+    }
     packet.m_nBytesRead = 0;
     packet.FreePacketHeader(); // new packet body
   }
@@ -1161,9 +1168,10 @@ bool CRTMP::ReadPacket(RTMPPacket &packet)
 
   if (packet.m_nBodySize > 0 && packet.m_body == NULL && !packet.AllocPacket(packet.m_nBodySize))
   {
-    Log(LOGDEBUG, "%s, failed to allocate packet", __FUNCTION__);
+    Log(LOGDEBUG, "%s, failed to allocate packet (BodySize = %lu bytes)", __FUNCTION__, packet.m_nBodySize);
     return false;
   }
+//Log(LOGDEBUG, "%s,allocated packet (BodySize = %lu bytes)", __FUNCTION__, packet.m_nBodySize);
 
   int nToRead = packet.m_nBodySize - packet.m_nBytesRead;
   int nChunk = m_chunkSize;
