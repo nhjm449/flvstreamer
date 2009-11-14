@@ -3,6 +3,10 @@
 
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #ifdef WIN32
 // Windows is little endian only 
 #define __LITTLE_ENDIAN 1234
@@ -27,7 +31,7 @@ typedef unsigned long long int uint64_t;
 #define __LITTLE_ENDIAN LITTLE_ENDIAN
 #define __BYTE_ORDER    BYTE_ORDER
 
-#elif (defined(BSD) && (BSD >= 199103)) || defined(__MacOSX__) || defined (__APPLE__) // more BSD
+#elif (defined(BSD) && (BSD >= 199103)) || defined(__MacOSX__) // more BSD
 #include <machine/endian.h>
 #define __BIG_ENDIAN	BIG_ENDIAN
 #define __LITTLE_ENDIAN	LITTLE_ENDIAN
@@ -97,6 +101,10 @@ double ReadNumber(const char *data);
 
 int ReadInt32LE(const char *data);
 int EncodeInt32LE(char *output, int nVal);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
 

@@ -1,6 +1,6 @@
-/*  FLVStreamer
- *	Copyright (C) 2008-2009 Andrej Stepanchuk
- *	Copyright (C) 2009 The Flvstreamer Team
+/*  RTMP Dump
+ *  Copyright (C) 2008-2009 Andrej Stepanchuk
+ *  Copyright (C) 2009 Howard Chu
  *
  *  This Program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -24,8 +24,12 @@
 
 #include <stdio.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 // Enable this to get full debugging output
 //#define _DEBUG
+//#define CRYPTO
 
 #ifdef _DEBUG
 #undef NODEBUG
@@ -35,13 +39,17 @@
 #define LOGERROR        1
 #define LOGWARNING	2
 #define LOGINFO		3
-#define LOGDEBUG	4
+#define LOGDEBUG		4
 #define LOGALL		5
 
 void LogSetOutput(FILE *file);
 void LogPrintf(const char *format, ...);
+void LogStatus(const char *format, ...);
 void Log(int level, const char *format, ...);
-void LogHex(const char *data, unsigned long len);
+void LogHex(int level, const char *data, unsigned long len);
 void LogHexString(const char *data, unsigned long len);
 
+#ifdef __cplusplus
+}
+#endif
 #endif

@@ -1,6 +1,6 @@
-/*  FLVStreamer
- *	Copyright (C) 2008-2009 Andrej Stepanchuk
- *	Copyright (C) 2009 The Flvstreamer Team
+/*  HTTP-RTMP Stream Server
+ *  Copyright (C) 2009 Andrej Stepanchuk
+ *  Copyright (C) 2009 Howard Chu
  *
  *  This Program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -37,11 +37,11 @@
 #include "AMFObject.h"
 #include "parseurl.h"
 
-int debuglevel = LOGERROR;
+int debuglevel = 1;
 
 using namespace RTMP_LIB;
 
-#define RTMPDUMP_STREAMS_VERSION	"v1.5"
+#define FLVSTREAMER_STREAMS_VERSION	"v1.4"
 
 #define RD_SUCCESS		0
 #define RD_FAILED		1
@@ -108,11 +108,13 @@ typedef struct
 	char *pageUrl;
 	char *app;
 	char *auth;
+	char *swfHash;
+	uint32_t swfSize;
 	char *flashVer;
 	char *subscribepath;
 
-        uint32_t dStartOffset;
-        uint32_t dStopOffset;
+	uint32_t dStartOffset;
+	uint32_t dStopOffset;
 	uint32_t nTimeStamp;
 } RTMP_REQUEST;
 
@@ -153,6 +155,8 @@ char *tcUrl = 0;
 char *pageUrl = 0;
 char *app = 0;
 char *auth = 0;
+char *swfHash = 0;
+uint32_t swfSize = 0;
 char *flashVer = 0;
 
 uint32_t nTimeStamp = 0;
@@ -466,8 +470,6 @@ void processTCPrequest
 
 	CRTMP *rtmp = new CRTMP();
 	uint32_t dSeek = 0; // can be used to start from a later point in the stream
-	uint32_t dLength;    // desired length of stream to play, 0 otherwise
-	unsigned long counterInc = 102400;
 
 	// reset RTMP options to defaults specified upon invokation of streams
 	RTMP_REQUEST req;
@@ -611,61 +613,45 @@ void processTCPrequest
 
 	// User defined seek offset
 	if (req.dStartOffset > 0) {
-        	if (req.bLiveStream) {
-                	Log(LOGWARNING, "Can't seek in a live stream, ignoring --seek option");
-                } else {
-                        dSeek += req.dStartOffset;
-                }
+		if (req.bLiveStream)
+			Log(LOGWARNING, "Can't seek in a live stream, ignoring --seek option");
+		else
+			dSeek += req.dStartOffset;
+	}
+
+        if(dSeek != 0) {
+                LogPrintf("Starting at TS: %d ms\n", req.nTimeStamp);
         }
 
-        // Calculate the length of the stream to still play
-        if (req.dStopOffset > 0) {
-                dLength = req.dStopOffset - dSeek;
-
-                // Quit if start seek is past required stop offset
-                if(dSeek >= req.dStopOffset) {
-                        LogPrintf("Already Completed\n");
-                        goto cleanup;
-                }
-        }
-
-        if(dSeek != 0)
-                LogPrintf("Starting at: %.3f sec\n", (double)req.nTimeStamp/1000.0);
-        if(dLength != 0)
-                LogPrintf("For duration: %.3f sec\n", (double)dLength/1000.0);
-
-	// how often to update progress counter
-	if (req.bLiveStream)
-		counterInc = 20480;
-	else
-		counterInc = 204800;
-
-        Log(LOGDEBUG, "Setting buffer time to: %.3f sec", (double)req.bufferTime/1000.0);
+        Log(LOGDEBUG, "Setting buffer time to: %dms", req.bufferTime);
         rtmp->SetBufferMS(req.bufferTime);
-
-	LogPrintf("Connecting ... port: %d, app: %s\n", req.rtmpport, req.app);
-        if (!rtmp->Connect(
+        rtmp->SetupStream(
 			req.protocol, 
 			req.hostname, 
 			req.rtmpport, 
+			NULL,	// sockshost
 			req.playpath, 
 			req.tcUrl, 
 			req.swfUrl, 
 			req.pageUrl, 
 			req.app, 
 			req.auth, 
+			req.swfHash, 
+			req.swfSize, 
 			req.flashVer, 
-			req.subscribepath,
-			dSeek,
-			dLength,
+			req.subscribepath, 
+			dSeek, 
+			-1,	// length
 			req.bLiveStream, 
-			req.timeout)) {
+			req.timeout);
+
+	LogPrintf("Connecting ... port: %d, app: %s\n", req.rtmpport, req.app);
+        if (!rtmp->Connect()) {
                 LogPrintf("%s, failed to connect!\n", __FUNCTION__);
         }
     	else 
 	{
 		unsigned long size = 0;
-		unsigned long lastSize = 0;
 		double percent = 0;
 	        double duration = 0.0;
 
@@ -702,41 +688,36 @@ void processTCPrequest
 				}
 
 				size += nRead;
+        
+                        	//LogPrintf("write %dbytes (%.1f KB)\n", nRead, nRead/1024.0);
+                        	if(duration <= 0) // if duration unknown try to get it from the stream (onMetaData)
+                                	duration = rtmp->GetDuration();
 
-				//LogPrintf("write %dbytes (%.1f kB)\n", nRead, nRead/1024.0);
-				if(duration <= 0) // if duration unknown try to get it from the stream (onMetaData)
-					duration = rtmp->GetDuration();
+                        	if(duration > 0) {
+                                	percent = ((double)(dSeek+req.nTimeStamp)) / (duration*1000.0)*100.0;
+                                	percent = round(percent*10.0)/10.0;
+                                	LogPrintf("\r%.3f KB / %.2f sec (%.1f%%)", (double)size/1024.0, (double)(req.nTimeStamp)/1000.0,  percent);
+                        	} else {
+                                	LogPrintf("\r%.3f KB / %.2f sec", (double)size/1024.0, (double)(req.nTimeStamp)/1000.0);
+                        	}
+                	}
+                	#ifdef _DEBUG
+                	else { Log(LOGDEBUG, "zero read!"); }
+                	#endif	
 
-				if(duration <= 0) {
-					if ( lastSize + counterInc <= size ) {
-						LogPrintf("\r%.3f kB / %.2f sec", (double)size/1024.0, (double)(req.nTimeStamp)/1000.0);
-						lastSize = size;
-					}
-				} else {
-					percent = (double)(dSeek+req.nTimeStamp)/(duration*10.0);
-					if ( lastSize + counterInc <= size ) {
-						LogPrintf("\r%.3f kB / %.2f sec (%.1f%%)", (double)size/1024.0, (double)(req.nTimeStamp)/1000.0, percent);
-						lastSize = size;
-					}
+				// Force clean close if a specified stop offset is reached
+				if (req.dStopOffset && req.nTimeStamp >= req.dStopOffset) {
+					LogPrintf("\nStop offset has been reached at %.2f seconds\n", (double)req.dStopOffset/1000.0);
+					nRead = 0;
+					rtmp->Close();
 				}
-			}
-			#ifdef _DEBUG
-			else { Log(LOGDEBUG, "zero read!"); }
-			#endif	
-
-			// Force clean close if a specified stop offset is reached
-			if (req.dStopOffset && req.nTimeStamp >= req.dStopOffset) {
-				LogPrintf("\nStop offset has been reached at %.3f sec\n", (double)req.dStopOffset/1000.0);
-				nRead = 0;
-				rtmp->Close();
-			}
 
 		} while(server->state == STREAMING_IN_PROGRESS && nRead > -1 && rtmp->IsConnected() && nWritten >= 0);
 	}
 cleanup:
 	LogPrintf("Closing connection... ");
-	rtmp->Close();
-	LogPrintf("done!\n\n");
+        rtmp->Close();
+        LogPrintf("done!\n\n");
 
 quit:
 	if(buffer) {
@@ -860,6 +841,25 @@ bool ParseOption(char opt, char *arg, RTMP_REQUEST *req)
 {
 	switch(opt) 
 	{
+                        case 'w':
+                        {
+                                int res = hex2bin(arg, &req->swfHash);
+                                if(!res || res!=32) {
+                                        req->swfHash = NULL;
+                                        Log(LOGWARNING, "Couldn't parse swf hash hex string, not heyxstring or not 32 bytes, ignoring!");
+                                }
+                                break;
+                        }
+			case 'x':
+                        {
+                                int size = atoi(arg);
+                                if(size <= 0) {
+                                        Log(LOGERROR, "SWF Size must be at least 1, ignoring\n");
+                                } else {
+                                        req->swfSize = size;
+                                }
+                                break;
+                        }
                         case 'b':
                         {
                                 int32_t bt = atol(arg);
@@ -873,9 +873,9 @@ bool ParseOption(char opt, char *arg, RTMP_REQUEST *req)
                         case 'v':
                                 req->bLiveStream = true; // no seeking or resuming possible!
                                 break;
-			case 'd':
-				req->subscribepath = optarg;
-				break;
+						case 'd':
+								req->subscribepath = optarg;
+								break;
                         case 'n':
                                 req->hostname = arg;
                                 break;
@@ -885,7 +885,7 @@ bool ParseOption(char opt, char *arg, RTMP_REQUEST *req)
                         case 'l':
 			{
                                 int protocol = atoi(arg);
-                                if(protocol != RTMP_PROTOCOL_RTMP) {
+                                if(protocol != RTMP_PROTOCOL_RTMP && protocol != RTMP_PROTOCOL_RTMPE) {
                                         Log(LOGERROR, "Unknown protocol specified: %d, using default", protocol);
                                         return false;
                                 } else {
@@ -945,14 +945,16 @@ bool ParseOption(char opt, char *arg, RTMP_REQUEST *req)
                                 break;
 			case 'A':
 				req->dStartOffset = atoi(arg)*1000;
+                                //printf("dStartOffset = %d\n", dStartOffset);
 				break;
 			case 'B':
 				req->dStopOffset = atoi(arg)*1000;
+                                //printf("dStartOffset = %d\n", dStartOffset);
 				break;
 			case 'q':
 				debuglevel = LOGCRIT;
 				break;
-			case 'x':
+			case 'V':
 				debuglevel = LOGDEBUG;
 				break;
 			case 'z':
@@ -975,8 +977,8 @@ int main(int argc, char **argv)
 	char *httpStreamingDevice = DEFAULT_HTTP_STREAMING_DEVICE; // streaming device, default 0.0.0.0
 	int nHttpStreamingPort = 80;				   // port
 
- 	LogPrintf("HTTP-RTMP Stream Server %s\n", RTMPDUMP_STREAMS_VERSION);
-	LogPrintf("(c) 2009 Andrej Stepanchuk, The Flvstreamer Team, license: GPL\n\n");
+ 	LogPrintf("HTTP-RTMP Stream Server %s\n", FLVSTREAMER_STREAMS_VERSION);
+	LogPrintf("(c) 2009 Andrej Stepanchuk, license: GPL\n\n");
 
 	// init request
 	memset(&defaultRTMPRequest, 0, sizeof(RTMP_REQUEST));
@@ -1001,6 +1003,8 @@ int main(int argc, char **argv)
 		{"tcUrl",   1, NULL, 't'},
 		{"pageUrl", 1, NULL, 'p'},
 		{"app",     1, NULL, 'a'},
+		{"swfhash", 1, NULL, 'w'},
+		{"swfsize", 1, NULL, 'x'},
 		{"auth",    1, NULL, 'u'},
 		{"flashVer",1, NULL, 'f'},
 		{"live"	   ,0, NULL, 'v'},
@@ -1016,35 +1020,38 @@ int main(int argc, char **argv)
 		{"stop",    1, NULL, 'B'},
 		{"debug",   0, NULL, 'z'},
 		{"quiet",   0, NULL, 'q'},
-		{"verbose", 0, NULL, 'x'},
+		{"verbose", 0, NULL, 'V'},
 		{0,0,0,0}
 	};
 
 	signal(SIGINT, sigIntHandler);
 
-	while((opt = getopt_long(argc, argv, "hvqxzr:s:t:p:a:f:u:n:c:l:y:m:d:D:A:B:g:", longopts, NULL)) != -1) {
+	while((opt = getopt_long(argc, argv, "hvqVzr:s:t:p:a:f:u:n:c:l:y:m:d:D:A:B:g:w:x:", longopts, NULL)) != -1) {
 		switch(opt) {
 			case 'h':
-				LogPrintf("\nThis program streams the flv media content from an rtmp server to an http client.\n\n");
+				LogPrintf("\nThis program dumps the media content streamed over rtmp.\n\n");
 				LogPrintf("--help|-h               Prints this help screen.\n");
 				LogPrintf("--rtmp|-r url           URL (e.g. rtmp//hotname[:port]/path)\n");
 				LogPrintf("--host|-n hostname      Overrides the hostname in the rtmp url\n");
 				LogPrintf("--port|-c port          Overrides the port in the rtmp url\n");
-				LogPrintf("--protocol|-l           Overrides the protocol in the rtmp url (0 - RTMP)\n"); 
+				LogPrintf("--protocol|-l           Overrides the protocol in the rtmp url (0 - RTMP, 3 - RTMPE)\n"); 
 				LogPrintf("--playpath|-y           Overrides the playpath parsed from rtmp url\n");
 				LogPrintf("--swfUrl|-s url         URL to player swf file\n");
 				LogPrintf("--tcUrl|-t url          URL to played stream (default: \"rtmp://host[:port]/app\")\n");
 				LogPrintf("--pageUrl|-p url        Web URL of played programme\n");
 				LogPrintf("--app|-a app            Name of player used\n");
+				LogPrintf("--swfhash|-w hexstring  SHA256 hash of the decompressed SWF file (32 bytes)\n");
+				LogPrintf("--swfsize|-x num        Size of the decompressed SWF file, required for SWFVerification\n");
 				LogPrintf("--auth|-u string        Authentication string to be appended to the connect string\n");
 				LogPrintf("--flashVer|-f string    Flash version string (default: \"%s\")\n", DEFAULT_FLASH_VER);
-				LogPrintf("--live|-v               Get a live stream\n");
+				LogPrintf("--live|-v               Get a live stream, no --resume (seeking) of live strems possible\n");
 				LogPrintf("--subscribe|-d string   Stream name to subscribe to (otherwise defaults to playpath if live is specifed)\n");
 				LogPrintf("--timeout|-m num        Timeout connection num seconds (default: %lu)\n", defaultRTMPRequest.timeout);
 				LogPrintf("--start|-A num          Start at num seconds into stream (not valid when using --live)\n");
 				LogPrintf("--stop|-B num           Stop at num seconds into stream\n");
 				LogPrintf("--buffer|-b             Buffer time in milliseconds (default: %lu)\n\n", 
 					defaultRTMPRequest.bufferTime);
+
 				LogPrintf("--device|-D             Streaming device ip address (default: %s)\n", DEFAULT_HTTP_STREAMING_DEVICE);
 				LogPrintf("--sport|-g              Streaming port (default: %d)\n\n", nHttpStreamingPort);
 				LogPrintf("--quiet|-q              Supresses all command output.\n");

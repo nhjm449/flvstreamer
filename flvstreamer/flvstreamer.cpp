@@ -1,6 +1,6 @@
 /*  FLVStreamer
- *	Copyright (C) 2008-2009 Andrej Stepanchuk
- *	Copyright (C) 2009 The Flvstreamer Team
+ *  Copyright (C) 2009 Andrej Stepanchuk
+ *  Copyright (C) 2009 Howard Chu
  *
  *  This Program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -19,6 +19,8 @@
  *
  */
 
+#define _FILE_OFFSET_BITS	64
+
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -33,12 +35,9 @@
 #include <stdio.h>
 #include <io.h>
 #include <fcntl.h>
-//signals: MINGW32 doesn't define these
-#define SIGHUP 1
-#define SIGQUIT 1
-#define SIGPIPE 3
-#define SIGALRM 13
-#define SIGUSR1 16
+#define	SET_BINMODE(f)	setmode(fileno(f), O_BINARY)
+#else
+#define	SET_BINMODE(f)
 #endif
 
 #include "rtmp.h"
@@ -46,16 +45,15 @@
 #include "AMFObject.h"
 #include "parseurl.h"
 
-int debuglevel = LOGERROR;
+int debuglevel = 1;
 
 using namespace RTMP_LIB;
 
-#define RTMPDUMP_VERSION	"v1.8l"
+#define FLVSTREAMER_VERSION	"v1.9"
 
 #define RD_SUCCESS		0
 #define RD_FAILED		1
 #define RD_INCOMPLETE		2
-
 
 // starts sockets
 bool InitSockets() 
@@ -91,6 +89,20 @@ uint32_t nIgnoredFlvFrameCounter = 0;
 uint32_t nIgnoredFrameCounter = 0;
 #define MAX_IGNORED_FRAMES	50
 
+FILE *file = 0;
+bool bCtrlC = false;
+
+void sigIntHandler(int sig) {
+	bCtrlC = true;
+	LogPrintf("Caught signal: %d, cleaning up, just a second...\n", sig);
+	// ignore all these signals now and let the connection close
+	signal(SIGHUP, SIG_IGN);
+	signal(SIGINT, SIG_IGN);
+	signal(SIGPIPE, SIG_IGN);
+	signal(SIGTERM, SIG_IGN);
+	signal(SIGQUIT, SIG_IGN);
+}
+
 int WriteHeader(
 	        char **buf,                     // target pointer, maybe preallocated
                 unsigned int len                // length of buffer if preallocated
@@ -115,6 +127,7 @@ int WriteHeader(
 	return size;
 }
 
+// Returns -3 if Play.Close/Stop, -2 if fatal error, -1 if no more media packets, 0 if ignorable error, >0 if there is a media packet
 int WriteStream(
 		CRTMP* rtmp, 
 		char **buf,			// target pointer, maybe preallocated
@@ -161,7 +174,7 @@ int WriteStream(
 			return 0;
 		}
 #ifdef _DEBUG
-		Log(LOGDEBUG, "\ntype: %02X, size: %d, TS: %d ms, abs TS: %d", packet.m_packetType, nPacketLen, packet.m_nTimeStamp, packet.m_hasAbsTimestamp);
+		Log(LOGDEBUG, "type: %02X, size: %d, TS: %d ms, abs TS: %d", packet.m_packetType, nPacketLen, packet.m_nTimeStamp, packet.m_hasAbsTimestamp);
 		if(packet.m_packetType == 0x09)
 			Log(LOGDEBUG, "frametype: %02X", (*packetBody & 0xf0));
 #endif
@@ -200,7 +213,7 @@ int WriteStream(
 					}
 				}
 
-				// handel FLV streams, even though the server resends the keyframe as an extra video packet
+				// hande FLV streams, even though the server resends the keyframe as an extra video packet
 				// it is also included in the first FLV stream chunk and we have to compare it and
 				// filter it out !!
 				//
@@ -214,10 +227,10 @@ int WriteStream(
                                 		ts = CRTMP::ReadInt24(packetBody+pos+4);
                                 		ts |= (packetBody[pos+7]<<24);
 						
-						#ifdef _DEBUG	
+#ifdef _DEBUG	
 						Log(LOGDEBUG, "keyframe search: FLV Packet: type %02X, dataSize: %d, timeStamp: %d ms",
 						                                                packetBody[pos], dataSize, ts);
-						#endif
+#endif
 						// ok, is it a keyframe!!!: well doesn't work for audio!
 						if(packetBody[pos /*6928, test 0*/] == initialFrameType /* && (packetBody[11]&0xf0) == 0x10*/) {
 							if(ts == nResumeTS) {
@@ -323,13 +336,6 @@ stopKeyframeSearch:
 
 			nTimeStamp = nResumeTS + packet.m_nTimeStamp;
 			prevTagSize = 11 + nPacketLen;
-#ifdef _DEBUG
-                        LogPrintf("\nDEBUG: type: %02X, size: %d, pktTS: %dms, TS: %dms, resumeTS: %dms, abs_TS: %d", packet.m_packetType, nPacketLen, packet.m_nTimeStamp, nTimeStamp, nResumeTS, packet.m_hasAbsTimestamp);
-#endif
-			// In live streams this nTimeStamp can contain an absolute TS, so only report the relative one from the type 16
-                        // update ext timestamp with this relative offset
-        		if(tsm && bLiveStream)
-				*tsm = packet.m_nTimeStamp;
 
 			*ptr = packet.m_packetType;
 			ptr++;
@@ -374,13 +380,6 @@ stopKeyframeSearch:
                                 nTimeStamp = CRTMP::ReadInt24(packetBody+pos+4);
                                 nTimeStamp |= (packetBody[pos+7]<<24);
 
-#ifdef _DEBUG
-                                LogPrintf("\nDEBUG: type: %02X, size: %d, pktTS: %dms, TS: %dms, abs_TS: %d", packet.m_packetType, nPacketLen, packet.m_nTimeStamp, nTimeStamp, packet.m_hasAbsTimestamp);
-#endif
-        			// In non-live this nTimeStamp can contain an absolute TS
-                                // update ext timestamp with this absolute offset
-                		if(tsm && ! bLiveStream)
-	        			*tsm = nTimeStamp;
 				/*
 				CRTMP::EncodeInt24(ptr+pos+4, nTimeStamp);
 				ptr[pos+7] = (nTimeStamp>>24)&0xff;//*/
@@ -402,15 +401,15 @@ stopKeyframeSearch:
                                 } else {
                                         prevTagSize = CRTMP::ReadInt32(packetBody+pos+11+dataSize);
                                         
-					#ifdef _DEBUG
+#ifdef _DEBUG
 					Log(LOGDEBUG, "FLV Packet: type %02X, dataSize: %lu, tagSize: %lu, timeStamp: %lu ms",
                                                 (unsigned char)packetBody[pos], dataSize, prevTagSize, nTimeStamp);
-					#endif
+#endif
 
                                         if(prevTagSize != (dataSize+11)) {
-                                                #ifdef _DEBUG
+#ifdef _DEBUG
 						Log(LOGWARNING, "Tag and data size are not consitent, writing tag size according to dataSize+11: %d", dataSize+11);
-                                                #endif
+#endif
 
 						prevTagSize = dataSize+11;
                                                 CRTMP::EncodeInt32(ptr+pos+11+dataSize, prevTagSize);
@@ -427,10 +426,16 @@ stopKeyframeSearch:
 			//ptr += 4;
 		}
 
-                // Return 0 if this was completed nicely with invoke message Play.Stop or Play.Complete
+		// In non-live this nTimeStamp can contain an absolute TS.
+		// Update ext timestamp with this absolute offset in non-live mode otherwise report the relative one
+		// LogPrintf("\nDEBUG: type: %02X, size: %d, pktTS: %dms, TS: %dms, bLiveStream: %d", packet.m_packetType, nPacketLen, packet.m_nTimeStamp, nTimeStamp, bLiveStream);
+		if(tsm)
+ 			*tsm = bLiveStream ? packet.m_nTimeStamp : nTimeStamp;
+
+                // Return -3 if this was completed nicely with invoke message Play.Stop or Play.Complete
                 if (rtnGetNextMediaPacket == 2) {
                         Log(LOGDEBUG, "Got Play.Complete or Play.Stop from server. Assuming stream is complete");
-                        return 0;
+                        return -3;
                 }
 
 		return size;
@@ -439,18 +444,427 @@ stopKeyframeSearch:
 	return -1; // no more media packets
 }
 
-FILE *file = 0;
-bool bCtrlC = false;
+int OpenResumeFile(const char *flvFile,        // file name [in]
+		   FILE **file,                // opened file [out]
+		   off_t *size,                // size of the file [out]
+		   char **metaHeader,          // meta data read from the file [out]
+		   uint32_t *nMetaHeaderSize,  // length of metaHeader [out]
+		   double *duration)           // duration of the stream in ms [out]
+{
+	const size_t bufferSize = 1024;
+	char buffer[bufferSize];
 
-void sigIntHandler(int sig) {
-	bCtrlC = true;
-	LogPrintf("\nCaught signal: %d, cleaning up, just a second...\n", sig);
-	// ignore all these signals now and let the connection close
-	signal(SIGHUP, SIG_IGN);
-	signal(SIGINT, SIG_IGN);
-	signal(SIGPIPE, SIG_IGN);
-	signal(SIGTERM, SIG_IGN);
-	signal(SIGQUIT, SIG_IGN);
+	*nMetaHeaderSize = 0;
+	*size = 0;
+
+	*file = fopen(flvFile, "r+b");
+	if (!*file)
+		return RD_SUCCESS; // RD_SUCCESS, because we go to fresh file mode instead of quiting
+	
+	fseek(*file, 0, SEEK_END);
+	*size = ftello(*file);
+	fseek(*file, 0, SEEK_SET);
+
+	if(*size > 0) {
+		// verify FLV format and read header 
+		uint32_t prevTagSize = 0;
+
+		// check we've got a valid FLV file to continue!
+		if(fread(buffer, 1, 13, *file) != 13) {
+			Log(LOGERROR, "Couldn't read FLV file header!");
+			return RD_FAILED;
+		}
+		if(buffer[0] != 'F' || buffer[1] != 'L' || buffer[2] != 'V' || buffer[3] != 0x01) {
+			Log(LOGERROR, "Inavlid FLV file!");
+			return RD_FAILED;
+		}
+
+		if((buffer[4]&0x05) == 0) {
+			Log(LOGERROR, "FLV file contains neither video nor audio, aborting!");
+			return RD_FAILED;
+		}
+	
+		uint32_t dataOffset = RTMP_LIB::CRTMP::ReadInt32(buffer+5);
+		fseek(*file, dataOffset, SEEK_SET);
+
+		if(fread(buffer, 1, 4, *file) != 4) {
+			Log(LOGERROR, "Invalid FLV file: missing first prevTagSize!");
+			return RD_FAILED;
+		}
+		prevTagSize = RTMP_LIB::CRTMP::ReadInt32(buffer);
+		if(prevTagSize != 0) {
+			Log(LOGWARNING, "First prevTagSize is not zero: prevTagSize = 0x%08X", prevTagSize);
+		}
+
+		// go through the file to find the meta data!
+		off_t pos = dataOffset+4;
+		bool bFoundMetaHeader = false;
+
+		while(pos < *size-4 && !bFoundMetaHeader) {
+			fseeko(*file, pos, SEEK_SET);
+			if(fread(buffer, 1, 4, *file)!=4)
+				break;
+
+			uint32_t dataSize = RTMP_LIB::CRTMP::ReadInt24(buffer+1);
+				
+			if(buffer[0] == 0x12) {
+				if (dataSize > bufferSize) {
+					Log(LOGERROR, "%s: dataSize (%d) > bufferSize (%d)", __FUNCTION__, dataSize, bufferSize);
+					return RD_FAILED;
+				}
+
+				fseeko(*file, pos+11, SEEK_SET);
+				if(fread(buffer, 1, dataSize, *file) != dataSize)
+					break;
+				
+				RTMP_LIB::AMFObject metaObj;
+				int nRes = metaObj.Decode(buffer, dataSize);
+				if(nRes < 0) {
+					Log(LOGERROR, "%s, error decoding meta data packet", __FUNCTION__);
+					break;
+				}
+					
+				std::string metastring = metaObj.GetProperty(0).GetString();
+
+				if(metastring == "onMetaData") {
+					metaObj.Dump();
+						
+					*nMetaHeaderSize = dataSize;
+					if (*metaHeader) free(*metaHeader);
+					*metaHeader = (char *)malloc(*nMetaHeaderSize);
+					memcpy(*metaHeader, buffer, *nMetaHeaderSize);
+
+					// get duration
+					AMFObjectProperty prop;
+					if(RTMP_LIB::CRTMP::FindFirstMatchingProperty(metaObj, "duration", prop)) {
+						*duration = prop.GetNumber();
+						Log(LOGDEBUG, "File has duration: %f", *duration);
+					}
+
+					bFoundMetaHeader = true;
+					break;
+				}
+				//metaObj.Reset();
+				//delete obj;
+			}
+			pos += (dataSize+11+4);
+		}
+
+		if(!bFoundMetaHeader)
+			Log(LOGWARNING, "Couldn't locate meta data!");
+	}
+
+	return RD_SUCCESS;
+}
+
+int GetLastKeyframe(FILE *file,                   // output file [in]
+		    int nSkipKeyFrames,           // max number of frames to skip when searching for key frame [in]
+		    uint32_t *dSeek,              // offset of the last key frame [out]
+		    char **initialFrame,          // content of the last keyframe [out]
+		    int *initialFrameType,        // initial frame type (audio/video) [out]
+		    uint32_t *nInitialFrameSize)  // length of initialFrame [out]
+{
+	const size_t bufferSize = 16;
+	char buffer[bufferSize];
+        uint8_t dataType;
+	bool bAudioOnly;
+	off_t size;
+
+	fseek(file, 0, SEEK_END);
+	size = ftello(file);
+
+        fseek(file, 4, SEEK_SET);
+        fread(&dataType, sizeof(uint8_t), 1, file);
+        bAudioOnly = (dataType & 0x4) && !(dataType & 0x1);
+
+	Log(LOGDEBUG, "bAudioOnly: %d, size: %llu", bAudioOnly, (unsigned long long)size);
+
+	// ok, we have to get the timestamp of the last keyframe (only keyframes are seekable) / last audio frame (audio only streams) 
+
+		//if(!bAudioOnly) // we have to handle video/video+audio different since we have non-seekable frames
+		//{
+			// find the last seekable frame
+			off_t tsize = 0;
+			uint32_t prevTagSize = 0;
+
+			// go through the file and find the last video keyframe
+			do {
+				int xread;
+skipkeyframe:
+				if(size-tsize < 13) {
+					Log(LOGERROR, "Unexpected start of file, error in tag sizes, couldn't arrive at prevTagSize=0");
+					return RD_FAILED;
+				}
+				fseeko(file, size-tsize-4, SEEK_SET);
+				xread = fread(buffer, 1, 4, file);
+				if(xread != 4) {
+					Log(LOGERROR, "Couldn't read prevTagSize from file!");
+					return RD_FAILED;
+				}
+
+				prevTagSize = RTMP_LIB::CRTMP::ReadInt32(buffer);
+				//Log(LOGDEBUG, "Last packet: prevTagSize: %d", prevTagSize);
+				
+				if(prevTagSize == 0) {
+					Log(LOGERROR, "Couldn't find keyframe to resume from!");
+					return RD_FAILED;
+				}
+
+				if(prevTagSize < 0 || prevTagSize > size-4-13) {
+					Log(LOGERROR, "Last tag size must be greater/equal zero (prevTagSize=%d) and smaller then filesize, corrupt file!", prevTagSize);
+					return RD_FAILED;
+				}
+				tsize += prevTagSize+4;
+
+				// read header
+				fseeko(file, size-tsize, SEEK_SET);
+				if(fread(buffer, 1, 12, file) != 12) {
+					Log(LOGERROR, "Couldn't read header!");
+					return RD_FAILED;
+				}
+				//*
+#ifdef _DEBUG
+				uint32_t ts = RTMP_LIB::CRTMP::ReadInt24(buffer+4);
+				ts |= (buffer[7]<<24);
+				Log(LOGDEBUG, "%02X: TS: %d ms", buffer[0], ts);
+#endif	//*/
+
+				// this just continues the loop whenever the number of skipped frames is > 0,
+				// so we look for the next keyframe to continue with
+				//
+				// this helps if resuming from the last keyframe fails and one doesn't want to start
+				// the download from the beginning
+				//
+				if(nSkipKeyFrames > 0 && !(!bAudioOnly && (buffer[0] != 0x09 || (buffer[11]&0xf0) != 0x10))) {
+					#ifdef _DEBUG
+					Log(LOGDEBUG, "xxxxxxxxxxxxxxxxxxxxxxxx Well, lets go one more back!");
+					#endif
+					nSkipKeyFrames--;
+					goto skipkeyframe;
+				}
+
+			} while(
+				(bAudioOnly && buffer[0] != 0x08) ||
+				(!bAudioOnly && (buffer[0] != 0x09 || (buffer[11]&0xf0) != 0x10))
+				); // as long as we don't have a keyframe / last audio frame
+		
+			// save keyframe to compare/find position in stream
+			*initialFrameType = buffer[0];
+			*nInitialFrameSize = prevTagSize-11;
+			*initialFrame = (char *)malloc(*nInitialFrameSize);
+			
+			fseeko(file, size-tsize+11, SEEK_SET);
+			if(fread(*initialFrame, 1, *nInitialFrameSize, file) != *nInitialFrameSize) {
+				Log(LOGERROR, "Couldn't read last keyframe, aborting!");
+				return RD_FAILED;
+			}
+
+			*dSeek = RTMP_LIB::CRTMP::ReadInt24(buffer+4); // set seek position to keyframe tmestamp
+			*dSeek |= (buffer[7]<<24);
+		//} 
+		//else // handle audio only, we can seek anywhere we'd like
+		//{
+		//}
+
+		if(*dSeek < 0) {
+			Log(LOGERROR, "Last keyframe timestamp is negative, aborting, your file is corrupt!");
+			return RD_FAILED;
+		}
+		Log(LOGDEBUG,"Last keyframe found at: %d ms, size: %d, type: %02X", *dSeek, *nInitialFrameSize, *initialFrameType);
+
+		/*
+		// now read the timestamp of the frame before the seekable keyframe:
+		fseeko(file, size-tsize-4, SEEK_SET);
+		if(fread(buffer, 1, 4, file) != 4) {
+			Log(LOGERROR, "Couldn't read prevTagSize from file!");
+			goto start;
+		}
+		uint32_t prevTagSize = RTMP_LIB::CRTMP::ReadInt32(buffer);
+		fseeko(file, size-tsize-4-prevTagSize+4, SEEK_SET);
+		if(fread(buffer, 1, 4, file) != 4) {
+			Log(LOGERROR, "Couldn't read previous timestamp!");
+			goto start;
+                }
+		uint32_t timestamp = RTMP_LIB::CRTMP::ReadInt24(buffer);
+		timestamp |= (buffer[3]<<24);
+
+		Log(LOGDEBUG, "Previuos timestamp: %d ms", timestamp);
+		*/
+
+		if(*dSeek != 0) {
+			// seek to position after keyframe in our file (we will ignore the keyframes resent by the server
+			// since they are sent a couple of times and handling this would be a mess)
+			fseeko(file, size-tsize+prevTagSize+4, SEEK_SET);
+			
+			// make sure the WriteStream doesn't write headers and ignores all the 0ms TS packets
+			// (including several meta data headers and the keyframe we seeked to)
+			//bNoHeader = true; if bResume==true this is true anyway
+		}
+
+	//}
+
+	return RD_SUCCESS;
+}
+
+int Download(CRTMP *rtmp,                      // connected CRTMP object
+	     FILE *file,
+	     uint32_t dSeek, 
+	     uint32_t dLength, 
+	     double duration, 
+	     bool bResume,
+	     char *metaHeader, 
+	     uint32_t nMetaHeaderSize, 
+	     char *initialFrame, 
+	     int initialFrameType, 
+	     uint32_t nInitialFrameSize,
+	     int nSkipKeyFrames,
+	     bool bStdoutMode,
+	     bool bLiveStream,
+	     bool bHashes,
+	     bool bOverrideBufferTime,
+	     uint32_t bufferTime,
+	     double *percent)                  // percentage downloaded [out]
+{
+	uint32_t timestamp = dSeek;
+	int32_t now, lastUpdate;
+	uint8_t dataType = 0;    // will be written into the FLV header (position 4)
+	int bufferSize = 1024*1024;
+	char *buffer = (char *)malloc(bufferSize);
+        int nRead = 0;
+	off_t size = ftello(file);
+	unsigned long lastPercent = 0;
+
+	memset(buffer, 0, bufferSize);
+
+	*percent = 0.0;
+
+	if(timestamp) {
+		Log(LOGDEBUG, "Continuing at TS: %d ms\n", timestamp);
+	}
+
+	if(bLiveStream) {
+		LogPrintf("Starting Live Stream\n");
+	} else {
+		// print initial status
+		// Workaround to exit with 0 if the file is fully (> 99.9%) downloaded
+		if( duration > 0 ) {
+			if  ((double)timestamp >= (double)duration*999.0 ) {
+				LogPrintf("Already Completed at: %.3f sec Duration=%.3f sec\n", (double)timestamp/1000.0, (double)duration/1000.0);
+				return RD_SUCCESS;
+			} else {
+				*percent = ((double)timestamp) / (duration*1000.0)*100.0;
+				*percent = round(*percent*10.0)/10.0;
+				LogPrintf("%s download at: %.3f kB / %.3f sec (%.1f%%)\n",
+					bResume ? "Resuming":"Starting",
+					(double)size/1024.0, (double)timestamp/1000.0, *percent);
+			}
+		} else {
+			LogPrintf("%s download at: %.3f kB\n", bResume ? "Resuming":"Starting",(double)size/1024.0);
+		}
+	}
+
+	if (dLength > 0)
+		LogPrintf("For duration: %.3f sec\n", (double)dLength/1000.0);
+
+	// write FLV header if not resuming
+	if(!bResume) {
+		nRead = WriteHeader(&buffer, bufferSize);
+		if(nRead > 0) {
+			if(fwrite(buffer, sizeof(unsigned char), nRead, file) != (size_t)nRead) {
+				Log(LOGERROR, "%s: Failed writing FLV header, exiting!", __FUNCTION__);
+				free(buffer);
+				return RD_FAILED;
+			}
+			size += nRead;
+		} else {
+			Log(LOGERROR, "Couldn't obtain FLV header, exiting!");
+			free(buffer);
+			return RD_FAILED;
+		}
+	}
+
+	now = GetTime();
+	lastUpdate = now-1000;
+	do
+	{
+		nRead = WriteStream(rtmp, &buffer, bufferSize, &timestamp, bResume && nInitialFrameSize > 0, bLiveStream, dSeek, metaHeader, nMetaHeaderSize, initialFrame, initialFrameType, nInitialFrameSize, &dataType);
+
+		//LogPrintf("nRead: %d\n", nRead);
+		if(nRead > 0) {
+			if(fwrite(buffer, sizeof(unsigned char), nRead, file) != (size_t)nRead) {
+				Log(LOGERROR, "%s: Failed writing, exiting!", __FUNCTION__);
+				free(buffer);
+				return RD_FAILED;
+                        }
+			size += nRead;
+	
+			//LogPrintf("write %dbytes (%.1f kB)\n", nRead, nRead/1024.0);
+			if(duration <= 0) // if duration unknown try to get it from the stream (onMetaData)
+				duration = rtmp->GetDuration();
+
+			if(duration > 0) {
+				// make sure we claim to have enough buffer time!
+				if(!bOverrideBufferTime && bufferTime < (duration*1000.0)) {
+					bufferTime = (uint32_t)(duration*1000.0)+5000; // extra 5sec to make sure we've got enough
+					
+					Log(LOGDEBUG, "Detected that buffer time is less than duration, resetting to: %dms", bufferTime);
+					rtmp->SetBufferMS(bufferTime);
+					rtmp->UpdateBufferMS();
+				}
+				*percent = ((double)timestamp) / (duration*1000.0)*100.0;
+				*percent = round(*percent*10.0)/10.0;
+				if (bHashes) {
+					if ( lastPercent + 1 <= *percent ) {
+						LogStatus("#");
+						lastPercent = (unsigned long)*percent;
+					}
+				} else {
+					now = GetTime();
+					if (abs(now - lastUpdate) > 200) {
+						LogStatus("\r%.3f kB / %.2f sec (%.1f%%)", (double)size/1024.0, (double)(timestamp)/1000.0, *percent);
+						lastUpdate = now;
+					}
+				}
+			} else {
+				now = GetTime();
+				if (abs(now - lastUpdate) > 200) {
+					if (bHashes)
+						LogStatus("#");
+					else
+						LogStatus("\r%.3f kB / %.2f sec", (double)size/1024.0, (double)(timestamp)/1000.0);
+					lastUpdate = now;
+				}
+			}
+		}
+#ifdef _DEBUG
+		else { Log(LOGDEBUG, "zero read!"); }
+#endif
+
+	} while(!bCtrlC && nRead > -1 && rtmp->IsConnected());
+	free(buffer);
+
+	Log(LOGDEBUG, "WriteStream returned: %d", nRead);
+
+	if(bResume && nRead == -2) {
+		LogPrintf("Couldn't resume FLV file, try --skip %d\n\n", nSkipKeyFrames+1);
+		return RD_FAILED;
+	}
+
+	// finalize header by writing the correct dataType (video, audio, video+audio)
+	if(!bResume && dataType != 0x5 && !bStdoutMode) {
+		//Log(LOGDEBUG, "Writing data type: %02X", dataType);
+		fseek(file, 4, SEEK_SET);
+		fwrite(&dataType, sizeof(unsigned char), 1, file);
+	}
+
+	if(nRead == -3)
+		return RD_SUCCESS;
+
+	if((duration > 0 && *percent < 99.9) || bCtrlC || nRead < 0 || rtmp->IsTimedout()) {
+		return RD_INCOMPLETE;
+	}
+
+	return RD_SUCCESS;
 }
 
 //#define _DEBUG_TEST_PLAYSTOP
@@ -466,15 +880,12 @@ int main(int argc, char **argv)
 	double percent = 0;
 	double duration = 0.0;
 
-	uint8_t dataType = 0;    // will be written into the FLV header (position 4)
 
 	int nSkipKeyFrames = 0;  // skip this number of keyframes when resuming
 
 	bool bOverrideBufferTime = false; // if the user specifies a buffer time override this is true
 	bool bStdoutMode = true;// if true print the stream directly to stdout, messages go to stderr
 	bool bResume = false;    // true in resume mode
-	//bool bNoHeader = false;  // in resume mode this will tell not to write an FLV header again
-	bool bAudioOnly = false; // when resuming this will tell whether its an audio only stream
 	uint32_t dSeek = 0;	 // seek position in resume mode, 0 otherwise
 	uint32_t bufferTime = 10*60*60*1000; // 10 hours as default
 
@@ -496,9 +907,9 @@ int main(int argc, char **argv)
 	bool bLiveStream = false; // is it a live stream? then we can't seek/resume
 	bool bHashes = false; // display byte counters not hashes by default
 
-	long int timeout = 300; // timeout connection after 300 seconds
+	long int timeout = 120; // timeout connection after 120 seconds
 	uint32_t dStartOffset = 0; // seek position in non-live mode
-	uint32_t dStopOffset = 0; // absolute stop timestamp in a stream
+	uint32_t dStopOffset = 0;
 	uint32_t dLength = 0; // length to play from stream - calculated from seek position and dStopOffset
 
 	char *rtmpurl = 0;
@@ -507,7 +918,10 @@ int main(int argc, char **argv)
 	char *pageUrl = 0;
 	char *app = 0;
 	char *auth = 0;
+	char *swfHash = 0;
+	uint32_t swfSize = 0;
 	char *flashVer = 0;
+        char *sockshost = 0;
 
 	char *flvFile = 0;
 
@@ -519,6 +933,8 @@ int main(int argc, char **argv)
 	signal(SIGTERM, sigIntHandler);
 	signal(SIGQUIT, sigIntHandler);
 
+	/* sleep(30); */
+
 	// Check for --quiet option before printing any output
 	int index = 0;
        	while (index < argc)
@@ -528,14 +944,15 @@ int main(int argc, char **argv)
 		index++;
 	}
 
- 	LogPrintf("FLVStreamer %s\n", RTMPDUMP_VERSION);
-	LogPrintf("(c) 2009 Andrej Stepanchuk, The Flvstreamer Team, license: GPL\n");
+ 	LogPrintf("FLVStreamer %s\n", FLVSTREAMER_VERSION);
+	LogPrintf("(c) 2009 Andrej Stepanchuk, Howard Chu, The Flvstreamer Team; license: GPL\n");
 
 	int opt;
 	struct option longopts[] = {
 		{"help",    0, NULL, 'h'},
 		{"host",    1, NULL, 'n'},
 		{"port",    1, NULL, 'c'},
+		{"socks",   1, NULL, 'S'},
 		{"protocol",1, NULL, 'l'},
 		{"playpath",1, NULL, 'y'},
 		{"rtmp",    1, NULL, 'r'},
@@ -544,6 +961,10 @@ int main(int argc, char **argv)
 		{"pageUrl", 1, NULL, 'p'},
 		{"app",     1, NULL, 'a'},
 		{"auth",    1, NULL, 'u'},
+#ifdef CRYPTO
+		{"swfhash", 1, NULL, 'w'},
+		{"swfsize", 1, NULL, 'x'},
+#endif
 		{"flashVer",1, NULL, 'f'},
 		{"live"	   ,0, NULL, 'v'},
 		{"flv",     1, NULL, 'o'},
@@ -557,44 +978,70 @@ int main(int argc, char **argv)
 		{"hashes",  0, NULL, '#'},
 		{"debug",   0, NULL, 'z'},
 		{"quiet",   0, NULL, 'q'},
-		{"verbose", 0, NULL, 'x'},
+		{"verbose", 0, NULL, 'V'},
 		{0,0,0,0}
 	};
 
-	while((opt = getopt_long(argc, argv, "hveqxzr:s:t:p:a:f:o:u:n:c:l:y:m:k:d:A:B:#", longopts, NULL)) != -1) {
+	while((opt = getopt_long(argc, argv, "hVveqzr:s:t:p:a:b:f:o:u:n:c:l:y:m:k:d:A:B:w:x:S:#", longopts, NULL)) != -1) {
 		switch(opt) {
 			case 'h':
-				LogPrintf("\nThis program streams the flv media content from an rtmp server to stdout.\n\n");
+				LogPrintf("\nThis program dumps the media content streamed over rtmp.\n\n");
 				LogPrintf("--help|-h               Prints this help screen.\n");
 				LogPrintf("--rtmp|-r url           URL (e.g. rtmp//hotname[:port]/path)\n");
 				LogPrintf("--host|-n hostname      Overrides the hostname in the rtmp url\n");
 				LogPrintf("--port|-c port          Overrides the port in the rtmp url\n");
-				LogPrintf("--protocol|-l           Overrides the protocol in the rtmp url (0 - RTMP)\n");
+				LogPrintf("--socks|-S host:port    Use the specified SOCKS proxy\n");
+				LogPrintf("--protocol|-l           Overrides the protocol in the rtmp url (0 - RTMP, 3 - RTMPE)\n");
 				LogPrintf("--playpath|-y           Overrides the playpath parsed from rtmp url\n");
 				LogPrintf("--swfUrl|-s url         URL to player swf file\n");
 				LogPrintf("--tcUrl|-t url          URL to played stream (default: \"rtmp://host[:port]/app\")\n");
 				LogPrintf("--pageUrl|-p url        Web URL of played programme\n");
 				LogPrintf("--app|-a app            Name of player used\n");
+#ifdef CRYPTO
+				LogPrintf("--swfhash|-w hexstring  SHA256 hash of the decompressed SWF file (32 bytes)\n");
+				LogPrintf("--swfsize|-x num        Size of the decompressed SWF file, required for SWFVerification\n");
+#endif
 				LogPrintf("--auth|-u string        Authentication string to be appended to the connect string\n");
 				LogPrintf("--flashVer|-f string    Flash version string (default: \"%s\")\n", DEFAULT_FLASH_VER);
 				LogPrintf("--live|-v               Save a live stream, no --resume (seeking) of live streams possible\n");
 				LogPrintf("--subscribe|-d string   Stream name to subscribe to (otherwise defaults to playpath if live is specifed)\n");
-				LogPrintf("--flv|-o string         FLV dump file\n");
+				LogPrintf("--flv|-o string         FLV output file name, if the file name is - print stream to stdout\n");
 				LogPrintf("--resume|-e             Resume a partial RTMP download\n");
 				LogPrintf("--timeout|-m num        Timeout connection num seconds (default: %lu)\n", timeout);
 				LogPrintf("--start|-A num          Start at num seconds into stream (not valid when using --live)\n");
-				LogPrintf("--stop|-B num           Stop at num seconds into stream (or duration of live stream to play)\n");
+				LogPrintf("--stop|-B num           Stop at num seconds into stream\n");
 				LogPrintf("--hashes|-#             Display progress with hashes, not with the byte counter\n");
 				LogPrintf("--buffer|-b             Buffer time in milliseconds (default: %lu), this option makes only sense in stdout mode (-o -)\n", 
 					bufferTime);
 				LogPrintf("--skip|-k num           Skip num keyframes when looking for last keyframe to resume from. Useful if resume fails (default: %d)\n\n",
 					nSkipKeyFrames);
 				LogPrintf("--quiet|-q              Supresses all command output.\n");
-				LogPrintf("--verbose|-x            Verbose command output.\n");
+				LogPrintf("--verbose|-V            Verbose command output.\n");
 				LogPrintf("--debug|-z              Debug level command output.\n");
-				LogPrintf("If you don't pass parameters for swfUrl, pageUrl, app or auth these properties will not be included in the connect ");
+				LogPrintf("If you don't pass parameters for swfUrl, pageUrl, app or auth these propertiews will not be included in the connect ");
 				LogPrintf("packet.\n\n");
 				return RD_SUCCESS;
+#ifdef CRYPTO
+			case 'w':
+			{
+				int res = hex2bin(optarg, &swfHash);
+				if(res!=32) {
+					swfHash = NULL;
+					Log(LOGWARNING, "Couldn't parse swf hash hex string, not heyxstring or not 32 bytes, ignoring!");
+				}
+				break;
+			}
+			case 'x':
+			{
+				int size = atoi(optarg);
+				if(size <= 0) {
+					Log(LOGERROR, "SWF Size must be at least 1, ignoring\n");
+				} else {
+					swfSize = size;
+				}
+				break;
+			}
+#endif
 			case 'k':
 				nSkipKeyFrames = atoi(optarg);
 				if(nSkipKeyFrames < 0) {
@@ -629,7 +1076,7 @@ int main(int argc, char **argv)
 				break;
 			case 'l':
 				protocol = atoi(optarg);
-				if(protocol != RTMP_PROTOCOL_RTMP) {
+				if(protocol != RTMP_PROTOCOL_RTMP && protocol != RTMP_PROTOCOL_RTMPE) {
 					Log(LOGERROR, "Unknown protocol specified: %d", protocol);
 					return RD_FAILED;
 				}
@@ -680,7 +1127,9 @@ int main(int argc, char **argv)
 				break;
 			case 'o':
 				flvFile = optarg;
-				bStdoutMode = false;
+				if(strcmp(flvFile, "-"))
+					bStdoutMode = false;
+
 				break;
 			case 'e':
 				bResume = true;
@@ -703,11 +1152,14 @@ int main(int argc, char **argv)
 			case 'q':
 				debuglevel = LOGCRIT;
 				break;
-			case 'x':
+			case 'V':
 				debuglevel = LOGDEBUG;
 				break;
 			case 'z':
 				debuglevel = LOGALL;
+				break;
+                        case 'S':
+                                sockshost = optarg;
 				break;
 			default:
 				LogPrintf("unknown option: %c\n", opt);
@@ -735,6 +1187,10 @@ int main(int argc, char **argv)
 		Log(LOGWARNING, "You haven't specified a protocol (--protocol) or rtmp url (-r), using default protocol RTMP");
 		protocol = RTMP_PROTOCOL_RTMP;
 	}
+	if(flvFile == 0) {
+		Log(LOGWARNING, "You haven't specified an output file (-o filename), using stdout");
+		bStdoutMode = true;
+	}
 
 	if(bStdoutMode && bResume) {
 		Log(LOGWARNING, "Can't resume in stdout mode, ignoring --resume option");
@@ -744,6 +1200,16 @@ int main(int argc, char **argv)
 	if(bLiveStream && bResume) {
 		Log(LOGWARNING, "Can't resume live stream, ignoring --resume option");
 		bResume = false;
+	}
+
+	if(swfHash == 0 && swfSize > 0) {
+		Log(LOGWARNING, "Ignoring SWF size, supply also the hash with --swfhash");
+		swfSize=0;
+	}
+
+	if(swfHash != 0 && swfSize == 0) {
+		Log(LOGWARNING, "Ignoring SWF hash, supply also the swf size  with --swfsize");
+		swfHash=NULL;
 	}
 
 	if(flashVer == 0)
@@ -770,280 +1236,7 @@ int main(int argc, char **argv)
 		strcpy(tcUrl, str);
 	}
 
-
-	int bufferSize = 1024*1024;
-	char *buffer = (char *)malloc(bufferSize);
-        int nRead = 0;
-
-	memset(buffer, 0, bufferSize);
-
-	CRTMP  *rtmp = new CRTMP();
-
-	Log(LOGDEBUG, "Setting buffer time to: %.3f sec", (double)bufferTime/1000.0);
-	rtmp->SetBufferMS(bufferTime);
-
-	unsigned long size = 0;
-	unsigned long lastSize = 0;
-	unsigned long counterInc = 102400;
-        uint32_t timestamp = 0;
-
-	// ok, we have to get the timestamp of the last keyframe (only keyframes are seekable) / last audio frame (audio only streams) 
-	if(bResume) {
-		file = fopen(flvFile, "r+b");
-		if(file == 0) {
-			bResume = false; // we are back in fresh file mode (otherwise finalizing file won't be done)
-			goto start; // file does not exist, so go back into normal mode
-		}
-
-		fseeko(file, 0, SEEK_END);
-		size = ftello(file);
-		fseek(file, 0, SEEK_SET);
-
-		if(size > 0) {
-			// verify FLV format and read header 
-			uint32_t prevTagSize = 0;
-
-			// check we've got a valid FLV file to continue!
-			if(fread(buffer, 1, 13, file) != 13) {
-				Log(LOGERROR, "Couldn't read FLV file header!");
-				nStatus = RD_FAILED;
-				goto clean;
-			}
-			if(buffer[0] != 'F' || buffer[1] != 'L' || buffer[2] != 'V' || buffer[3] != 0x01) {
-				Log(LOGERROR, "Invalid FLV file!");
-				nStatus = RD_FAILED;
-                                goto clean;
-			}
-
-			if((buffer[4]&0x05) == 0) {
-                                Log(LOGERROR, "FLV file contains neither video nor audio, aborting!");
-				nStatus = RD_FAILED;
-				goto clean;
-			}
-                        bAudioOnly = (buffer[4] & 0x4) && !(buffer[4] & 0x1);
-                        if(bAudioOnly)
-				Log(LOGDEBUG, "Resuming audio only stream!");
-	
-			uint32_t dataOffset = RTMP_LIB::CRTMP::ReadInt32(buffer+5);
-			fseeko(file, dataOffset, SEEK_SET);
-
-			if(fread(buffer, 1, 4, file) != 4) {
-				Log(LOGERROR, "Invalid FLV file: missing first prevTagSize!");
-				nStatus = RD_FAILED;
-                                goto clean;
-			}
-			prevTagSize = RTMP_LIB::CRTMP::ReadInt32(buffer);
-			if(prevTagSize != 0) {
-				Log(LOGWARNING, "First prevTagSize is not zero: prevTagSize = 0x%08X", prevTagSize);
-			}
-
-			// go through the file to find the meta data!
-			uint32_t pos = dataOffset+4;
-			bool bFoundMetaHeader = false;
-
-			while(pos < size-4 && !bFoundMetaHeader) {
-				fseeko(file, pos, SEEK_SET);
-				if(fread(buffer, 1, 4, file)!=4)
-					break;
-
-				uint32_t dataSize = RTMP_LIB::CRTMP::ReadInt24(buffer+1);
-				
-				if(buffer[0] == 0x12) {
-					fseeko(file, pos+11, SEEK_SET);
-					if(fread(buffer, 1, dataSize, file) != dataSize)
-						break;
-					
-					RTMP_LIB::AMFObject metaObj;
-					int nRes = metaObj.Decode(buffer, dataSize);
-					if(nRes < 0) {
-						Log(LOGERROR, "%s, error decoding meta data packet", __FUNCTION__);
-						break;
-					}
-					
-					std::string metastring = metaObj.GetProperty(0).GetString();
-
-					if(metastring == "onMetaData") {
-						metaObj.Dump();
-						
-						nMetaHeaderSize = dataSize;
-						metaHeader = (char *)malloc(nMetaHeaderSize);
-						memcpy(metaHeader, buffer, nMetaHeaderSize);
-
-						// get duration
-						AMFObjectProperty prop;
-                				if(RTMP_LIB::CRTMP::FindFirstMatchingProperty(metaObj, "duration", prop)) {
-							duration = prop.GetNumber();
-							Log(LOGDEBUG, "File has duration: %f", duration);
-						}		
-
-						bFoundMetaHeader = true;
-						break;
-					}
-					//metaObj.Reset();
-					//delete obj;
-				}
-				pos += (dataSize+11+4);
-			}
-
-			if(!bFoundMetaHeader)
-				Log(LOGWARNING, "Couldn't locate meta data!");
-
-			//if(!bAudioOnly) // we have to handle video/video+audio different since we have non-seekable frames
-			//{
-				// find the last seekable frame
-				uint32_t tsize = 0;
-
-				// go through the file and find the last video keyframe
-				do {
-skipkeyframe:
-					if(size-tsize < 13) {
-						Log(LOGERROR, "Unexpected start of file, error in tag sizes, couldn't arrive at prevTagSize=0");
-						nStatus = RD_FAILED; goto clean;
-					}
-
-					fseeko(file, size-tsize-4, SEEK_SET);
-					if(fread(buffer, 1, 4, file) != 4) {
-						Log(LOGERROR, "Couldn't read prevTagSize from file!");
-						nStatus = RD_FAILED; goto clean;
-					}
-
-					prevTagSize = RTMP_LIB::CRTMP::ReadInt32(buffer);
-					//Log(LOGDEBUG, "Last packet: prevTagSize: %d", prevTagSize);
-				
-					if(prevTagSize == 0) {
-						Log(LOGERROR, "Couldn't find keyframe to resume from!");
-						nStatus = RD_FAILED; goto clean;
-					}
-
-					if(prevTagSize < 0 || prevTagSize > size-4-13) {
-						Log(LOGERROR, "Last tag size must be greater/equal zero (prevTagSize=%d) and smaller then filesize, corrupt file!", prevTagSize);
-						nStatus = RD_FAILED; goto clean;
-					}
-					tsize += prevTagSize+4;
-
-					// read header
-					fseeko(file, size-tsize, SEEK_SET);
-					if(fread(buffer, 1, 12, file) != 12) {
-						Log(LOGERROR, "Couldn't read header!");
-						nStatus=RD_FAILED; goto clean;
-					}
-					//*
-					#ifdef _DEBUG
-					uint32_t ts = RTMP_LIB::CRTMP::ReadInt24(buffer+4);
-					ts |= (buffer[7]<<24);
-					Log(LOGDEBUG, "%02X: TS: %d ms", buffer[0], ts);
-					#endif	//*/
-
-					// this just continues the loop whenever the number of skipped frames is > 0,
-					// so we look for the next keyframe to continue with
-					//
-					// this helps if resuming from the last keyframe fails and one doesn't want to start
-					// the download from the beginning
-					//
-					if(nSkipKeyFrames > 0 && !(!bAudioOnly && (buffer[0] != 0x09 || (buffer[11]&0xf0) != 0x10))) {
-						#ifdef _DEBUG
-						Log(LOGDEBUG, "xxxxxxxxxxxxxxxxxxxxxxxx Well, lets go one more back!");
-						#endif
-						nSkipKeyFrames--;
-						goto skipkeyframe;
-					}
-
-				} while(
-						(bAudioOnly && buffer[0] != 0x08) ||
-						(!bAudioOnly && (buffer[0] != 0x09 || (buffer[11]&0xf0) != 0x10))
-					); // as long as we don't have a keyframe / last audio frame
-		
-				// save keyframe to compare/find position in stream
-				initialFrameType = buffer[0];
-				nInitialFrameSize = prevTagSize-11;
-				initialFrame = (char *)malloc(nInitialFrameSize);
-				
-				fseeko(file, size-tsize+11, SEEK_SET);
-				if(fread(initialFrame, 1, nInitialFrameSize, file) != nInitialFrameSize) {
-					Log(LOGERROR, "Couldn't read last keyframe, aborting!");
-					nStatus=RD_FAILED;
-					goto clean;
-				}
-
-				dSeek = RTMP_LIB::CRTMP::ReadInt24(buffer+4); // set seek position to keyframe tmestamp
-				dSeek |= (buffer[7]<<24);
-			//} 
-			//else // handle audio only, we can seek anywhere we'd like
-			//{
-			//}
-
-			if(dSeek < 0) {
-				Log(LOGERROR, "Last keyframe timestamp is negative, aborting, your file is corrupt!");
-				nStatus=RD_FAILED;
-				goto clean;
-			}
-			Log(LOGDEBUG,"Last keyframe found at: %d ms, size: %d, type: %02X", dSeek, nInitialFrameSize, initialFrameType);
-
-			/*
-			// now read the timestamp of the frame before the seekable keyframe:
-			fseeko(file, size-tsize-4, SEEK_SET);
-			if(fread(buffer, 1, 4, file) != 4) {
-				Log(LOGERROR, "Couldn't read prevTagSize from file!");
-				goto start;
-			}
-			uint32_t prevTagSize = RTMP_LIB::CRTMP::ReadInt32(buffer);
-			fseeko(file, size-tsize-4-prevTagSize+4, SEEK_SET);
-			if(fread(buffer, 1, 4, file) != 4) {
-                                Log(LOGERROR, "Couldn't read previous timestamp!");
-                                goto start;
-                        }
-			uint32_t timestamp = RTMP_LIB::CRTMP::ReadInt24(buffer);
-			timestamp |= (buffer[3]<<24);
-
-			Log(LOGDEBUG, "Previuos timestamp: %d ms", timestamp);
-			*/
-
-			if(dSeek == 0) {
-                                Log(LOGDEBUG, "Last keyframe is first frame in stream, switching from resume to normal mode!");
-                                bResume = false;
-				goto start;
-                        } 
-			else 
-			{
-				// seek to position after keyframe in our file (we will ignore the keyframes resent by the server
-				// since they are sent a couple of times and handling this would be a mess)
-				fseeko(file, size-tsize+prevTagSize+4, SEEK_SET);
-			
-				// make sure the WriteStream doesn't write headers and ignores all the 0ms TS packets
-				// (including several meta data headers and the keyframe we seeked to)
-				//bNoHeader = true; if bResume==true this is true anyway
-			}
-		}
-	} else {
-start:
-		if(file != 0)
-			fclose(file);
-
-		if(bStdoutMode) {
-			file = stdout;
-			// Allows win32 to use binary mode on stdout
-			#ifdef WIN32
-			_setmode( _fileno( stdout ), _O_BINARY );
-			#endif
-		}
-		else
-		{
-			file = fopen(flvFile, "wb");
-			// No buffering
-			setbuf (file, NULL);
-			if(file == 0) {
-                        	LogPrintf("Failed to open file!\n");
-                        	return RD_FAILED;
-                	}
-		}
-	}
-       
-	#ifdef _DEBUG
-	netstackdump = fopen("netstackdump", "wb");
-	netstackdump_read = fopen("netstackdump_read", "wb");
-	#endif
-
-	LogPrintf("Connecting ...\n");
+	int first = 1;
 
 	// User defined seek offset
 	if (dStartOffset > 0) {
@@ -1051,195 +1244,140 @@ start:
 	        if (bLiveStream) {
                 	Log(LOGWARNING, "Can't seek in a live stream, ignoring --start option");
                 	dStartOffset = 0;
-                // Don't need the start offset if resuming an existing file
-                } else if (bResume) {
-                        Log(LOGDEBUG, "Can't seek a resumed stream, ignoring --start option");
-                        dStartOffset = 0;
-                } else {
-                        dSeek += dStartOffset;
-                }
-        }
-        
-        // Calculate the length of the stream to still play
-        if (dStopOffset > 0) {
-                dLength = dStopOffset - dSeek;
-
-                // Quit if start seek is past required stop offset
-                if(dSeek >= dStopOffset) {
-                        LogPrintf("Already Completed\n");
-                        nStatus = RD_SUCCESS;
-                        goto clean;
                 }
         }
 
-	//{ // here we decrease the seek time by 10ms to make sure the server starts with the next keyframe
-	//double dFindSeek = dSeek;
+	CRTMP  *rtmp = new CRTMP();
+	rtmp->SetupStream(protocol, hostname, port, sockshost, playpath, tcUrl, swfUrl,
+		pageUrl, app, auth, swfHash, swfSize, flashVer, subscribepath,
+		dSeek, 0, bLiveStream, timeout);
 
-	//if(!bAudioOnly && dFindSeek >= 10.0)
-	//	dFindSeek-=10.0;
+	off_t size = 0;
 
-	if (!rtmp->Connect(protocol, hostname, port, playpath, tcUrl, swfUrl, pageUrl, app, auth, flashVer, subscribepath, dSeek, dLength, bLiveStream, timeout)) {
-		LogPrintf("Failed to connect!\n");
-		return RD_FAILED;
-	}
-	Log(LOGINFO, "Connected...");
-	//}
-	
-	/*#ifdef _DEBUG
-	debugTS = dSeek;
-	#endif*/
+	// ok, we have to get the timestamp of the last keyframe (only keyframes are seekable) / last audio frame (audio only streams) 
+	if(bResume) {
+		nStatus = OpenResumeFile(flvFile, &file, &size, &metaHeader, &nMetaHeaderSize, &duration);
+		if (nStatus == RD_FAILED)
+			goto clean;
 
-	timestamp  = dSeek;
-
-	// print initial status
-	// Workaround to exit with 0 if the file is fully (> 99.9%) downloaded
-	if( duration > 0 && (double)timestamp >= (double)duration*999.0 ) {
-                LogPrintf("Already Completed at: %.3f sec Duration=%.3f sec\n", (double)timestamp/1000.0, (double)timestamp/1000.0);
-                goto clean;
-        } else if(duration > 0) {
-		percent = ((double)timestamp) / (duration*1000.0)*100.0;
-                percent = round(percent*10.0)/10.0;
-                LogPrintf("Starting download at: %.3f kB / %.3f sec (%.1f%%)\n", (double)size/1024.0, (double)timestamp/1000.0, percent);
-        } else {
-                LogPrintf("Starting download at: %.3f kB\n", (double)size/1024.0);
-        }
-
-        if (dLength > 0)
-                LogPrintf("For duration: %.3f sec\n", (double)dLength/1000.0);
-
-	// how often to update progress counter
-	if (bLiveStream)
-		counterInc = 25600;
-	else if (bHashes)
-		counterInc = 102400;
-	else
-		counterInc = 204800;
-
-	// write FLV header if not resuming
-	if(!bResume) {
-		nRead = WriteHeader(&buffer, bufferSize);
-		if(nRead > 0) {
-			if(fwrite(buffer, sizeof(unsigned char), nRead, file) != (size_t)nRead) {
-				Log(LOGERROR, "%s: Failed writing FLV header, exiting!", __FUNCTION__);
-				nStatus=RD_FAILED;
+		if (!file) {
+			// file does not exist, so go back into normal mode
+			bResume = false; // we are back in fresh file mode (otherwise finalizing file won't be done)
+		} else {
+			nStatus = GetLastKeyframe(file, nSkipKeyFrames,
+						  &dSeek, &initialFrame,
+						  &initialFrameType,
+						  &nInitialFrameSize);
+			if (nStatus == RD_FAILED) {
+				Log(LOGDEBUG, "Failed to get last keyframe.");
 				goto clean;
 			}
-			size += nRead;
-		} else {
-			Log(LOGERROR, "Couldn't obtain FLV header, exiting!");
-			nStatus=RD_FAILED;
-			goto clean;
-		}
-	}
-	do
-	{
-		nRead = WriteStream(rtmp, &buffer, bufferSize, &timestamp, bResume, bLiveStream, dSeek, metaHeader, nMetaHeaderSize, initialFrame, initialFrameType, nInitialFrameSize, &dataType);
 
-		//LogPrintf("nRead: %d\n", nRead);
-		if(nRead > 0) {
-			if(fwrite(buffer, sizeof(unsigned char), nRead, file) != (size_t)nRead) {
-				Log(LOGERROR, "%s: Failed writing, exiting!", __FUNCTION__);
-                                nStatus=RD_FAILED;
-                                goto clean;
-                        }
-			size += nRead;
-	
-			//LogPrintf("write %dbytes (%.1f KB)\n", nRead, nRead/1024.0);
-			if(duration <= 0) // if duration unknown try to get it from the stream (onMetaData)
-				duration = rtmp->GetDuration();
-
-			if(duration <= 0) {
-				// counter without percent
-				if ( lastSize + counterInc <= size ) {
-					if (bHashes)
-						LogPrintf("#");
-					else
-						LogPrintf("\r%.3f kB / %.2f sec", (double)size/1024.0, (double)(timestamp)/1000.0);
-					lastSize = size;
-				}
-
-			} else {
-				// make sure we claim to have enough buffer time!
-				if(!bOverrideBufferTime && bufferTime < (duration*1000.0)) {
-					bufferTime = (uint32_t)(duration*1000.0)+5000; // extra 5sec to make sure we've got enough
-					Log(LOGDEBUG, "Detected that buffer time is less than duration, resetting to: %dms", bufferTime);
-					rtmp->SetBufferMS(bufferTime);
-					rtmp->UpdateBufferMS();
-				}
-				// counter with percent
-				percent = (double)timestamp/(duration*10.0);
-				if (bHashes) {
-					if ( lastSize + 1 <= percent ) {
-						LogPrintf("#");
-						lastSize = (unsigned long)percent;
-					}
-				} else {
-					if ( lastSize + counterInc <= size ) {
-						LogPrintf("\r%.3f kB / %.2f sec (%.1f%%)", (double)size/1024.0, (double)(timestamp)/1000.0, percent);
-						lastSize = size;
-					}
-				}
+			if (dSeek == 0) {
+				Log(LOGDEBUG, "Last keyframe is first frame in stream, switching from resume to normal mode!");
+				bResume = false;
 			}
 		}
-		#ifdef _DEBUG
-		else { Log(LOGDEBUG, "zero read!"); }
-		#endif
-		
-		// Force clean close if a specified stop offset is reached
-		if (dStopOffset && timestamp >= dStopOffset) {
-		        LogPrintf("\nStop offset has been reached at %.3f sec\n", (double)dStopOffset/1000.0);
-		        nRead = 0;
-		        rtmp->Close();
+	}
+
+	if (!file) {
+		if(bStdoutMode) {
+			file = stdout;
+			SET_BINMODE(file);
+		} else
+		{
+			file = fopen(flvFile, "w+b");
+			if(file == 0) {
+                        	LogPrintf("Failed to open file! %s\n", flvFile);
+                        	return RD_FAILED;
+                	}
 		}
-		
-	} while(!bCtrlC && nRead > -1 && rtmp->IsConnected());
-	LogPrintf("\n");
-
-	// finalize header by writing the correct dataType (video, audio, video+audio)
-	if(!bResume && dataType != 0x5 && !bStdoutMode) {
-		Log(LOGDEBUG, "Writing data type: %02X", dataType);
-		fseeko(file, 4, SEEK_SET);
-		fwrite(&dataType, sizeof(unsigned char), 1, file);
 	}
+       
+#ifdef _DEBUG
+	netstackdump = fopen("netstackdump", "wb");
+	netstackdump_read = fopen("netstackdump_read", "wb");
+#endif
 
-	// Always fail when Ctrl-C is pressed
-	if ( bCtrlC) {
-	        nStatus = RD_INCOMPLETE;
-	        goto clean;
-	}
+	while (!bCtrlC) {
+		Log(LOGDEBUG, "Setting buffer time to: %dms", bufferTime);
+		rtmp->SetBufferMS(bufferTime);
 
-	if(bResume && nRead == -2) {
-		Log(LOGERROR, "Couldn't resume FLV file, try --skip %d", nSkipKeyFrames+1);
-		nStatus = RD_FAILED;
-		goto clean;
-	}
-	
-	// If duration is available then assume the download is complete if > 99.9%
-	if (bLiveStream == false) {
-		if (duration > 0 && percent > 99.9) {
-			LogPrintf("Download complete\n");
-			nStatus = RD_SUCCESS;
-			goto clean;
+		if (first) {
+			first = 0;
+			LogPrintf("Connecting ...\n");
+
+			if (!rtmp->Connect()) {
+				nStatus = RD_FAILED;
+				break;
+			}
+
+			Log(LOGINFO, "Connected...");
+
+			// User defined seek offset
+			if (dStartOffset > 0) {
+				// Don't need the start offset if resuming an existing file
+				if (bResume) {
+					Log(LOGWARNING, "Can't seek a resumed stream, ignoring --start option");
+					dStartOffset = 0;
+				} else {
+					dSeek = dStartOffset;
+				}
+			}
+
+		        // Calculate the length of the stream to still play
+			if (dStopOffset > 0) {
+				dLength = dStopOffset - dSeek;
+
+				// Quit if start seek is past required stop offset
+				if(dLength <= 0) {
+					LogPrintf("Already Completed\n");
+					nStatus = RD_SUCCESS;
+					break;
+				}
+			}
+
+			if (!rtmp->ConnectStream(dSeek, dLength)) {
+				nStatus = RD_FAILED;
+				break;
+			}
 		} else {
-			LogPrintf("Download may be incomplete (downloaded about %.2f%%), try --resume\n", percent);
-			nStatus = RD_INCOMPLETE;
+			nInitialFrameSize = 0;
+
+			Log(LOGINFO, "Connection timed out, trying to resume.\n\n");
+			if (!rtmp->ToggleStream()) {
+				Log(LOGERROR, "Failed to resume the stream\n\n");
+				if (!rtmp->IsTimedout())
+				  nStatus = RD_FAILED;
+				else
+				  nStatus = RD_INCOMPLETE;
+				break;
+			}
+			bResume = true;
 		}
+
+		nStatus = Download(rtmp, file, dSeek, dLength, duration, bResume,
+                           metaHeader, nMetaHeaderSize, initialFrame,
+                           initialFrameType, nInitialFrameSize,
+                           nSkipKeyFrames, bStdoutMode, bLiveStream, bHashes,
+                           bOverrideBufferTime, bufferTime, &percent);
+		free(initialFrame);
+		initialFrame = NULL;
+
+		/* If we succeeded, we're done.
+		 */
+		if (nStatus != RD_INCOMPLETE || !rtmp->IsTimedout())
+			break;
 	}
 
-	// If nRead is zero then assume complete
-	if(nRead == 0) {
-	        LogPrintf("Download complete\n");
-	        nStatus = RD_SUCCESS;
-	        goto clean;
+	if (nStatus == RD_SUCCESS) {
+		LogPrintf("Download complete\n");
+	} else if (nStatus == RD_INCOMPLETE)  {
+		LogPrintf("Download may be incomplete (downloaded about %.2f%%), try resuming\n", percent);
 	}
-	
-	// Ensure we have a non-zero exit code where WriteStream has failed
-	if (nRead < 0)
-		nStatus = RD_INCOMPLETE;
 
-        //Log(LOGDEBUG, "nStatus: %d, nRead: %d", nStatus, nRead);
 clean:
-	Log(LOGDEBUG, "Closing connection.");
+	Log(LOGDEBUG, "Closing connection.\n");
 	rtmp->Close();
 	//LogPrintf("done!\n\n");
 
@@ -1254,7 +1392,7 @@ clean:
 	if(netstackdump_read != 0)
                 fclose(netstackdump_read);	
 #endif
-        Log(LOGDEBUG, "Exit code: %d\n", nStatus);
+	delete rtmp;
 	return nStatus;
 }
 

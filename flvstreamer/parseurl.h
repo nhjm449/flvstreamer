@@ -1,6 +1,8 @@
+#ifndef _PARSEURL_H_
+#define _PARSEURL_H_
 /*  FLVStreamer
- *	Copyright (C) 2008-2009 Andrej Stepanchuk
- *	Copyright (C) 2009 The Flvstreamer Team
+ *  Copyright (C) 2009 Andrej Stepanchuk
+ *  Copyright (C) 2009 Howard Chu
  *
  *  This Program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -19,11 +21,15 @@
  *
  */
 
-#ifndef _PARSEURL_H_
-#define _PARSEURL_H_
-
+#ifdef __cplusplus
+extern "C" {
+#endif
 int hex2bin(char *str, char **hex);
-bool ParseUrl(char *url, int *protocol, char **host, unsigned int *port, char **playpath, char **app);
+int ParseUrl(char *url, int *protocol, char **host, unsigned int *port, char **playpath, char **app);
+char *ParsePlaypath(const char *playpath);
+#ifdef __cplusplus
+}
+#endif
 
 #endif
 

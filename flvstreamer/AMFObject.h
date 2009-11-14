@@ -3,7 +3,7 @@
 /*
  *      Copyright (C) 2005-2008 Team XBMC
  *      http://www.xbmc.org
- *	Copyright (C) 2008-2009 Andrej Stepanchuk, The Flvstreamer Team
+ *	Copyright (C) 2008-2009 Andrej Stepanchuk
  *
  *  This Program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -67,7 +67,7 @@ namespace RTMP_LIB
       virtual ~AMFObjectProperty();
 
       const std::string &GetPropName() const;
-      void SetPropName(const std::string strName);
+      void SetPropName(const std::string& strName);
 
       AMFDataType GetType() const;
 
