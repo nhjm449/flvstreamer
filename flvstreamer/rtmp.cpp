@@ -766,8 +766,8 @@ bool CRTMP::SendConnectPacket()
   // add auth string
   if(Link.auth)
   {
-//  	*enc = 0x01; enc++;
-//  	*enc = 0x01; enc++;
+  	*enc = 0x01; enc++;
+  	*enc = 0x01; enc++;
 
   	enc += EncodeString(enc, Link.auth);
   }
@@ -1150,6 +1150,11 @@ int CRTMP::HandleInvoke(const char *body, unsigned int nBodySize)
   else if (CSCMP(method,"onFCSubscribe"))
   {
     // SendOnFCSubscribe();
+  }
+  else if (CSCMP(method,"onFCUnsubscribe"))
+  {
+    Close();
+    return 1;
   }
   else if (CSCMP(method,"_onbwcheck"))
   {

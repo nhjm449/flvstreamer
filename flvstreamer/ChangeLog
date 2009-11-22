@@ -4,6 +4,16 @@ Copyright (C) 2009 The Flvstreamer Team
 Copyright (C) 2009 Howard Chu
 CDistributed under the GPL v2
 
+22 Nov 2009, 1.9a
+
+- Applied fixes from, rtmpdump svn r55:
+
+- Fix auth encoding, partial revert of r12 (of rtmpdump svn)
+
+- flvstreamer bug#107134, don't retry live streams
+
+- flvstreamer bug#107134 stop streaming for onFCUnsubscribe
+
 14 Nov 2009, 1.9
 
 - Reforked from rtmpdump svn-r52 which has had all below fixes and features merged into it.
