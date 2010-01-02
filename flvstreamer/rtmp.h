@@ -4,7 +4,7 @@
  *      Copyright (C) 2005-2008 Team XBMC
  *      http://www.xbmc.org
  *      Copyright (C) 2008-2009 Andrej Stepanchuk
- *      Copyright (C) 2009 Howard Chu
+ *      Copyright (C) 2009-2010 Howard Chu
  *
  *  This Program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -23,229 +23,215 @@
  *
  */
 
-//#include <string>
-//#include <vector>
-
 #ifdef WIN32
 #include <winsock.h>
+#define GetSockError()	WSAGetLastError()
+#define setsockopt(a,b,c,d,e)	(setsockopt)(a,b,c,(const char *)d,(int)e)
+#define EWOULDBLOCK	WSAETIMEDOUT    /* we don't use nonblocking, but we do use timeouts */
+#define sleep(n)	Sleep(n*1000)
+#define msleep(n)	Sleep(n)
+#define socklen_t	int
+#define SET_RCVTIMEO(tv,s)	int tv = s*1000
 #else
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/times.h>
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <netinet/in.h>
-#include <errno.h>
+#include <netinet/tcp.h>
+#define GetSockError()	errno
+#define closesocket(s)	close(s)
+#define msleep(n)	usleep(n*1000)
+#define SET_RCVTIMEO(tv,s)	struct timeval tv = {s,0}
 #endif
+
+#include <errno.h>
+#include <stdint.h>
 
 #include "log.h"
-
-#ifdef CRYPTO
-#include "dh.h"
-#endif
-
-#include "AMFObject.h"
-#include "rtmppacket.h"
+#include "amf.h"
 
 #define RTMP_PROTOCOL_UNDEFINED	-1
 #define RTMP_PROTOCOL_RTMP      0
-#define RTMP_PROTOCOL_RTMPT     1 // not yet supported
-#define RTMP_PROTOCOL_RTMPS     2 // not yet supported
-#define RTMP_PROTOCOL_RTMPE     3 // not yet supported
-#define RTMP_PROTOCOL_RTMPTE    4 // not yet supported
-#define RTMP_PROTOCOL_RTMFP     5 // not yet supported
+#define RTMP_PROTOCOL_RTMPT     1	// not yet supported
+#define RTMP_PROTOCOL_RTMPS     2	// not yet supported
+#define RTMP_PROTOCOL_RTMPE     3
+#define RTMP_PROTOCOL_RTMPTE    4	// not yet supported
+#define RTMP_PROTOCOL_RTMFP     5	// not yet supported
 
-extern char RTMPProtocolStringsLower[][7];
+#define RTMP_DEFAULT_CHUNKSIZE	128
 
-int32_t GetTime();
+#define RTMP_BUFFER_CACHE_SIZE (16*1024) // needs to fit largest number of bytes recv() may return
 
-inline int GetSockError() {
-#ifdef WIN32
-        return WSAGetLastError();
-#else
-        return errno;
+#define	RTMP_CHANNELS	65600
+
+extern const char RTMPProtocolStringsLower[][7];
+extern bool RTMP_ctrlC;
+
+uint32_t RTMP_GetTime();
+
+#define RTMP_PACKET_TYPE_AUDIO 0x08
+#define RTMP_PACKET_TYPE_VIDEO 0x09
+#define RTMP_PACKET_TYPE_INFO  0x12
+
+#define RTMP_MAX_HEADER_SIZE 14
+
+typedef unsigned char BYTE;
+
+typedef struct RTMPPacket
+{
+  BYTE m_headerType;
+  BYTE m_packetType;
+  int m_nChannel;
+  int32_t m_nInfoField1;	// 3 first bytes
+  int32_t m_nInfoField2;	// last 4 bytes in a long header, absolute timestamp for long headers, relative timestamp for short headers
+  bool m_hasAbsTimestamp;	// timestamp absolute or relative?
+  uint32_t m_nTimeStamp;	// absolute timestamp
+  uint32_t m_nBodySize;
+  uint32_t m_nBytesRead;
+  char *m_body;
+} RTMPPacket;
+
+typedef struct RTMPSockBuf
+{
+  int sb_socket;
+  int sb_size;				/* number of unprocessed bytes in buffer */
+  char *sb_start;			/* pointer into sb_pBuffer of next byte to process */
+  char sb_buf[RTMP_BUFFER_CACHE_SIZE];	/* data read from socket */
+  bool sb_timedout;
+} RTMPSockBuf;
+
+void RTMPPacket_Reset(RTMPPacket *p);
+void RTMPPacket_Dump(RTMPPacket *p);
+bool RTMPPacket_Alloc(RTMPPacket *p, int nSize);
+void RTMPPacket_Free(RTMPPacket *p);
+
+#define RTMPPacket_IsReady(a)	((a)->m_nBytesRead == (a)->m_nBodySize)
+
+typedef struct RTMP_LNK
+{
+  const char *hostname;
+  unsigned int port;
+  int protocol;
+
+  AVal playpath;
+  AVal tcUrl;
+  AVal swfUrl;
+  AVal pageUrl;
+  AVal app;
+  AVal auth;
+  AVal flashVer;
+  AVal subscribepath;
+  AVal token;
+
+  double seekTime;
+  uint32_t length;
+  bool bLiveStream;
+
+  long int timeout;		// number of seconds before connection times out
+
+  const char *sockshost;
+  unsigned short socksport;
+
+  AVal SWFHash;
+  uint32_t SWFSize;
+  char SWFVerificationResponse[42];
+} RTMP_LNK;
+
+typedef struct RTMP
+{
+  int m_socket;
+  int m_inChunkSize;
+  int m_outChunkSize;
+  int m_nBWCheckCounter;
+  int m_nBytesIn;
+  int m_nBytesInSent;
+  int m_nBufferMS;
+  int m_stream_id;		// returned in _result from invoking createStream
+  int m_mediaChannel;
+  uint32_t m_mediaStamp;
+  uint32_t m_pauseStamp;
+  int m_pausing;
+  int m_nServerBW;
+  int m_nClientBW;
+  uint8_t m_nClientBW2;
+  bool m_bPlaying;
+
+  AVal *m_methodCalls;		/* remote method calls queue */
+  int m_numCalls;
+
+  RTMP_LNK Link;
+  RTMPPacket *m_vecChannelsIn[RTMP_CHANNELS];
+  RTMPPacket *m_vecChannelsOut[RTMP_CHANNELS];
+  int m_channelTimestamp[RTMP_CHANNELS];	// abs timestamp of last packet
+
+  double m_fAudioCodecs;	// audioCodecs for the connect packet
+  double m_fVideoCodecs;	// videoCodecs for the connect packet
+  double m_fEncoding;		/* AMF0 or AMF3 */
+
+  double m_fDuration;		// duration of stream in seconds
+
+  RTMPSockBuf m_sb;
+#define m_socket	m_sb.sb_socket
+#define m_nBufferSize	m_sb.sb_size
+#define m_pBufferStart	m_sb.sb_start
+#define m_pBuffer	m_sb.sb_buf
+#define m_bTimedout	m_sb.sb_timedout
+} RTMP;
+
+void RTMP_SetBufferMS(RTMP *r, int size);
+void RTMP_UpdateBufferMS(RTMP *r);
+
+void RTMP_SetupStream(RTMP *r, int protocol,
+		      const char *hostname,
+		      unsigned int port,
+		      const char *sockshost,
+		      AVal *playpath,
+		      AVal *tcUrl,
+		      AVal *swfUrl,
+		      AVal *pageUrl,
+		      AVal *app,
+		      AVal *auth,
+		      AVal *swfSHA256Hash,
+		      uint32_t swfSize,
+		      AVal *flashVer,
+		      AVal *subscribepath,
+		      double dTime,
+		      uint32_t dLength, bool bLiveStream, long int timeout);
+
+bool RTMP_Connect(RTMP *r);
+bool RTMP_Serve(RTMP *r);
+
+bool RTMP_ReadPacket(RTMP * r, RTMPPacket * packet);
+bool RTMP_SendPacket(RTMP * r, RTMPPacket * packet, bool queue);
+bool RTMP_IsConnected(RTMP *r);
+bool RTMP_IsTimedout(RTMP *r);
+double RTMP_GetDuration(RTMP *r);
+bool RTMP_ToggleStream(RTMP *r);
+
+bool RTMP_ConnectStream(RTMP *r, double seekTime, uint32_t dLength);
+bool RTMP_ReconnectStream(RTMP *r, int bufferTime, double seekTime, uint32_t dLength);
+void RTMP_DeleteStream(RTMP *r);
+int RTMP_GetNextMediaPacket(RTMP *r, RTMPPacket *packet);
+int RTMP_ClientPacket(RTMP *r, RTMPPacket *packet);
+
+void RTMP_Init(RTMP *r);
+void RTMP_Close(RTMP *r);
+
+bool RTMP_SendCtrl(RTMP * r, short nType, unsigned int nObject, unsigned int nTime);
+bool RTMP_SendPause(RTMP *r, bool DoPause, double dTime);
+bool RTMP_FindFirstMatchingProperty(AMFObject *obj, const AVal *name,
+				      AMFObjectProperty *p);
+
+bool RTMPSockBuf_Fill(RTMPSockBuf *sb);
+
+#ifdef CRYPTO
+/* hashswf.c */
+#define HASHLEN	32
+
+int RTMP_HashSWF(const char *url, unsigned int *size, unsigned char *hash, int ask);
 #endif
-}
-
-namespace RTMP_LIB
-{
-
-typedef struct
-{
-        const char *hostname;
-        unsigned int port;
-	int protocol;
-	const char *playpath;
-
-        const char *tcUrl;
-        const char *swfUrl;
-        const char *pageUrl;
-        const char *app;
-        const char *auth;
-	const char *SWFHash;
-	uint32_t SWFSize;
-	const char *flashVer;
-	const char *subscribepath;
-
-	double seekTime;
-	uint32_t length;
-	bool bLiveStream;
-
-	long int timeout; // number of seconds before connection times out
-	
-	#ifdef CRYPTO
-	DH *dh; // for encryption
-	RC4_KEY *rc4keyIn;
-	RC4_KEY *rc4keyOut;
-
-	//char SWFHashHMAC[32];
-	char SWFVerificationResponse[42];
-	#endif
-
-        const char *sockshost;
-        unsigned short socksport;
-} LNK;
-
-class CRTMP
-  {
-    public:
-
-      CRTMP();
-      virtual ~CRTMP();
-
-      void SetBufferMS(int size);
-      void UpdateBufferMS();
-
-      void SetupStream(
-      	int protocol, 
-	const char *hostname, 
-	unsigned int port, 
-        const char *sockshost,
-	const char *playpath, 
-	const char *tcUrl, 
-	const char *swfUrl, 
-	const char *pageUrl, 
-	const char *app, 
-	const char *auth,
-	const char *swfSHA256Hash,
-	uint32_t swfSize,
-	const char *flashVer, 
-	const char *subscribepath, 
-      	double dTime,
-      	uint32_t dLength,
-	bool bLiveStream,
-	long int timeout=300);
-
-      bool Connect();
-
-      bool IsConnected(); 
-      bool IsTimedout(); 
-      double GetDuration();
-      bool ToggleStream();
-
-      bool ConnectStream(double seekTime=-10.0, uint32_t dLength=0);
-      bool ReconnectStream(int bufferTime, double seekTime=-10.0, uint32_t dLength=0);
-      void DeleteStream();
-      int GetNextMediaPacket(RTMPPacket &packet);
-
-      void Close();
-
-      static int EncodeString(char *output, const std::string &strValue);
-      static int EncodeNumber(char *output, double dVal);
-      static int EncodeInt16(char *output, short nVal);
-      static int EncodeInt24(char *output, int nVal);
-      static int EncodeInt32(char *output, int nVal);
-      static int EncodeBoolean(char *output,bool bVal);
-
-      static unsigned short ReadInt16(const char *data);
-      static unsigned int  ReadInt24(const char *data);
-      static unsigned int  ReadInt32(const char *data);
-      static std::string ReadString(const char *data);
-      static bool ReadBool(const char *data);
-      static double ReadNumber(const char *data);
-	  bool SendPause(bool DoPause, double dTime);
-
-	  static bool DumpMetaData(AMFObject &obj);
-      static bool FindFirstMatchingProperty(AMFObject &obj, std::string name, AMFObjectProperty &p);
-
-    protected:
-      bool HandShake(bool FP9HandShake=true);
-      bool RTMPConnect();
-      bool SocksNegotiate();
-
-      bool SendConnectPacket();
-      bool SendServerBW();
-      bool SendCheckBW();
-      bool SendCheckBWResult(double txn);
-      bool SendCtrl(short nType, unsigned int nObject, unsigned int nTime = 0);
-      bool SendBGHasStream(double dId, char *playpath);
-      bool SendCreateStream(double dStreamId);
-      bool SendDeleteStream(double dStreamId);
-      bool SendFCSubscribe(const char *subscribepath);
-      bool SendPlay();
-      bool SendSeek(double dTime);
-      bool SendBytesReceived();
-
-      int HandlePacket(RTMPPacket &packet);
-      int HandleInvoke(const char *body, unsigned int nBodySize);
-      bool HandleMetadata(char *body, unsigned int len);
-      void HandleChangeChunkSize(const RTMPPacket &packet);
-      void HandleAudio(const RTMPPacket &packet);
-      void HandleVideo(const RTMPPacket &packet);
-      void HandleCtrl(const RTMPPacket &packet);
-      void HandleServerBW(const RTMPPacket &packet);
-      void HandleClientBW(const RTMPPacket &packet);
-     
-      int EncodeString(char *output, const std::string &strName, const std::string &strValue);
-      int EncodeNumber(char *output, const std::string &strName, double dVal);
-      int EncodeBoolean(char *output, const std::string &strName, bool bVal);
-
-      bool SendRTMP(RTMPPacket &packet);
-
-      bool ReadPacket(RTMPPacket &packet);
-      int  ReadN(char *buffer, int n);
-      bool WriteN(const char *buffer, int n);
-
-      bool FillBuffer();
-	  void FlushBuffer();
-
-      int  m_socket;
-      int  m_chunkSize;
-      int  m_nBWCheckCounter;
-      int  m_nBytesIn;
-      int  m_nBytesInSent;
-      int  m_nBufferMS;
-      int  m_stream_id; // returned in _result from invoking createStream
-      int  m_mediaChannel;
-      uint32_t  m_mediaStamp;
-      uint32_t  m_pauseStamp;
-      int m_bPausing;
-      int m_nServerBW;
-      int m_nClientBW;
-      uint8_t m_nClientBW2;
-      bool m_bPlaying;
-      bool m_bTimedout;
-
-      //std::string m_strPlayer;
-      //std::string m_strPageUrl;
-      //std::string m_strLink;
-      //std::string m_strPlayPath;
-
-      std::vector<std::string> m_methodCalls; //remote method calls queue
-
-      LNK Link;
-      char *m_pBuffer;      // data read from socket
-      char *m_pBufferStart; // pointer into m_pBuffer of next byte to process
-      int  m_nBufferSize;   // number of unprocessed bytes in buffer
-      RTMPPacket *m_vecChannelsIn[65600];
-      RTMPPacket *m_vecChannelsOut[65600];
-      int  m_channelTimestamp[65600]; // abs timestamp of last packet
-
-      double m_fAudioCodecs; // audioCodecs for the connect packet
-      double m_fVideoCodecs; // videoCodecs for the connect packet
-
-      double m_fDuration; // duration of stream in seconds
-  };
-};
 
 #endif

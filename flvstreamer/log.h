@@ -27,9 +27,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-// Enable this to get full debugging output
-//#define _DEBUG
-//#define CRYPTO
+/* Enable this to get full debugging output */
+/* #define _DEBUG */
 
 #ifdef _DEBUG
 #undef NODEBUG
@@ -39,15 +38,26 @@ extern "C" {
 #define LOGERROR        1
 #define LOGWARNING	2
 #define LOGINFO		3
-#define LOGDEBUG		4
-#define LOGALL		5
+#define LOGDEBUG	4
+#define LOGDEBUG2	5
+#define LOGALL		6
+
+#define Log	AMF_Log
+#define LogHex	AMF_LogHex
+#define LogHexString	AMF_LogHexString
+#define LogPrintf	AMF_LogPrintf
+#define LogSetOutput	AMF_LogSetOutput
+#define LogStatus	AMF_LogStatus
+#define debuglevel	AMF_debuglevel
+
+extern int debuglevel;
 
 void LogSetOutput(FILE *file);
 void LogPrintf(const char *format, ...);
 void LogStatus(const char *format, ...);
 void Log(int level, const char *format, ...);
 void LogHex(int level, const char *data, unsigned long len);
-void LogHexString(const char *data, unsigned long len);
+void LogHexString(int level, const char *data, unsigned long len);
 
 #ifdef __cplusplus
 }

@@ -1,10 +1,8 @@
-flvstreamer
-(C) 2009 Andrej Stepanchuk, Howard Chu and The Flvstreamer Team
-Credit goes to team boxee for the XBMC RTMP code used in flvstreamer.
+FLVStreamer v2.1a
+(C) 2008-2009 Andrej Stepanchuk
+(C) 2009-2010 Howard Chu
+(C) 2009-2010 The FLVstreamer Team
 License: GPLv2
-
-Build
------
 
 To compile type "make" with your platform name, e.g.
 
@@ -22,31 +20,79 @@ but you may need to override the CROSS_COMPILE and INC variables, e.g.
 
 Please read the Makefile to see what other make variables are used.
 
-Usage
------
+Credit goes to team boxee for the XBMC RTMP code originally used in flvstreamer.
+The current code is based on the XBMC code but rewritten in C by Howard Chu.
 
-Full usage:
+Example Servers
+---------------
+Three different types of servers are also present in this distribution:
+ rtmpsrv - a stub server
+ rtmpsuck - a transparent proxy
+ streams - an RTMP to HTTP gateway
 
-  $ ./flvstreamer -h
-  $ ./streams -h
+rtmpsrv - Note that this is very incomplete code, and I haven't yet decided
+whether or not to finish it. In its current form it is useful for obtaining
+all the parameters that a real Flash client would send to an RTMP server, so
+that they can be used with flvstreamer.
 
-To record an rtmp stream use get_iplayer ( http://linuxcentre.net/getiplayer ):
+rtmpsuck - proxy server. See below...
 
-  $ ./get_iplayer --get 1 --modes flash --flvstreamer ./flvstreamer
+All you need to do is redirect your Flash clients to the machine running this
+server and it will dump out all the connect / play parameters that the Flash
+client sent. The simplest way to cause the redirect is by editing /etc/hosts
+when you know the hostname of the RTMP server, and point it to localhost while
+running rtmpsrv on your machine. (This approach should work on any OS; on
+Windows you would edit %SystemRoot%\system32\drivers\etc\hosts.)
 
-To get an rtmp stream such as rtmp://cyzy7r959.rtmphost.com/flowplayer/metacafe use:
+On Linux you can also use iptables to redirect all outbound RTMP traffic.
+You can do this as root:
 
-  $ ./flvstreamer -r rtmp://cyzy7r959.rtmphost.com/flowplayer/metacafe
-  Or,
-  $ ./flvstreamer -n cyzy7r959.rtmphost.com -a flowplayer -y metacafe
+iptables -t nat -A OUTPUT -p tcp --dport 1935 -j REDIRECT
 
-To stream an rtmp stream via http on port 8080:
+In my original plan I would have the transparent proxy running as a special
+user (e.g. user "proxy"), and regular Flash clients running as any other user.
+In that case the proxy would make the connection to the real RTMP server. The
+iptables rule would look like this:
 
-   $ ./streams -g 8080
+iptables -t nat -A OUTPUT -p tcp --dport 1935 -m owner \! --uid-owner proxy \
+ -j REDIRECT
 
-Then point a player at it, e.g.
+A rule like the above will be needed to use rtmpsuck.
 
-   $ mplayer "http://127.0.0.1:8080/?n=cyzy7r959.rtmphost.com&a=flowplayer&y=metacafe"
+Using it in this mode takes advantage of the Linux support for IP redirects;
+in particular it uses a special getsockopt() call to retrieve the original
+destination address of the connection. That way the proxy can create the
+real outbound connection without any other help from the user. I'm not aware
+of equivalent functionality on BSD, Windows, or any other platform; if you
+know how to handle this I'd be interested in hearing about it.
 
-Where the URL GET parameters are the same as the flvstreamer options. Options
-can optionally be specified on the command line like in flvstreamer.
+The rtmpsuck command has only one option: "-z" to turn on debug logging.
+It listens on port 1935 for RTMP sessions, but you can also redirect other
+ports to it as needed (read the iptables docs). It first performs an RTMP
+handshake with the client, then waits for the client to send a connect
+request. It parses and prints the connect parameters, then makes an
+outbound connection to the real RTMP server. It performs an RTMP handshake
+with that server, forwards the connect request, and from that point on it
+just relays packets back and forth between the two endpoints.
+
+It also checks for a few packets that it treats specially: a play packet
+from the client will get parsed so that the playpath can be displayed.
+
+Once the play command is processed, all subsequent audio/video data received
+from the server will be written to a file, as well as being delivered back
+to the client.
+
+The point of all this, instead of just using a sniffer, is that since rtmpsuck
+has performed real handshakes with both the client and the server and can so
+record the data.
+
+streams - HTTP gateway: this is an HTTP server that accepts requests that
+consist of flvstreamer parameters. It then connects to the specified RTMP
+server and returns the retrieved data in the HTTP response. The only valid
+HTTP request is "GET /" but additional options can be provided in normal
+URL-encoded fashion. E.g.
+  GET /?r=rtmp:%2f%2fserver%2fmyapp&y=somefile HTTP/1.0
+
+is equivalent the flvstreamer parameters "-r rtmp://server/myapp -y somefile".
+
+Note that only the shortform (single letter) flvstreamer options are supported.
