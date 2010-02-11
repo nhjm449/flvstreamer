@@ -1227,7 +1227,7 @@ main(int argc, char **argv)
       index++;
     }
 
-  LogPrintf("flvstreamer %s\n", FLVSTREAMER_VERSION);
+  LogPrintf("FLVStreamer %s\n", FLVSTREAMER_VERSION);
   LogPrintf
     ("(c) 2010 Andrej Stepanchuk, Howard Chu, The Flvstreamer Team; license: GPL\n");
 
