@@ -17,7 +17,7 @@
  *  GNU General Public License for more details.
  *
  *  You should have received a copy of the GNU General Public License
- *  along with FLVStreamer; see the file COPYING.  If not, write to
+ *  along with flvstreamer; see the file COPYING.  If not, write to
  *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *  http://www.gnu.org/copyleft/gpl.html
  *
@@ -27,7 +27,7 @@
 #include <winsock.h>
 #define GetSockError()	WSAGetLastError()
 #define setsockopt(a,b,c,d,e)	(setsockopt)(a,b,c,(const char *)d,(int)e)
-#define EWOULDBLOCK	WSAETIMEDOUT    /* we don't use nonblocking, but we do use timeouts */
+#define EWOULDBLOCK	WSAETIMEDOUT	/* we don't use nonblocking, but we do use timeouts */
 #define sleep(n)	Sleep(n*1000)
 #define msleep(n)	Sleep(n)
 #define socklen_t	int
@@ -76,21 +76,30 @@ uint32_t RTMP_GetTime();
 #define RTMP_PACKET_TYPE_VIDEO 0x09
 #define RTMP_PACKET_TYPE_INFO  0x12
 
-#define RTMP_MAX_HEADER_SIZE 14
+#define RTMP_MAX_HEADER_SIZE 18
 
 typedef unsigned char BYTE;
+
+typedef struct RTMPChunk
+{
+  int c_headerSize;
+  int c_chunkSize;
+  char *c_chunk;
+  char c_header[RTMP_MAX_HEADER_SIZE];
+} RTMPChunk;
 
 typedef struct RTMPPacket
 {
   BYTE m_headerType;
   BYTE m_packetType;
+  BYTE m_hasAbsTimestamp;	// timestamp absolute or relative?
   int m_nChannel;
-  int32_t m_nInfoField1;	// 3 first bytes
+  uint32_t m_nInfoField1;	// 3 first bytes
   int32_t m_nInfoField2;	// last 4 bytes in a long header, absolute timestamp for long headers, relative timestamp for short headers
-  bool m_hasAbsTimestamp;	// timestamp absolute or relative?
   uint32_t m_nTimeStamp;	// absolute timestamp
   uint32_t m_nBodySize;
   uint32_t m_nBytesRead;
+  RTMPChunk *m_chunk;
   char *m_body;
 } RTMPPacket;
 
@@ -125,6 +134,8 @@ typedef struct RTMP_LNK
   AVal flashVer;
   AVal subscribepath;
   AVal token;
+  bool authflag;
+  AMFObject extras;
 
   double seekTime;
   uint32_t length;
@@ -135,14 +146,10 @@ typedef struct RTMP_LNK
   const char *sockshost;
   unsigned short socksport;
 
-  AVal SWFHash;
-  uint32_t SWFSize;
-  char SWFVerificationResponse[42];
 } RTMP_LNK;
 
 typedef struct RTMP
 {
-  int m_socket;
   int m_inChunkSize;
   int m_outChunkSize;
   int m_nBWCheckCounter;
@@ -158,6 +165,8 @@ typedef struct RTMP
   int m_nClientBW;
   uint8_t m_nClientBW2;
   bool m_bPlaying;
+  bool m_bSendEncoding;
+  bool m_bSendCounter;
 
   AVal *m_methodCalls;		/* remote method calls queue */
   int m_numCalls;
@@ -201,11 +210,14 @@ void RTMP_SetupStream(RTMP *r, int protocol,
 		      double dTime,
 		      uint32_t dLength, bool bLiveStream, long int timeout);
 
-bool RTMP_Connect(RTMP *r);
+bool RTMP_Connect(RTMP *r, RTMPPacket *cp);
+bool RTMP_Connect0(RTMP *r, struct sockaddr *svc);
+bool RTMP_Connect1(RTMP *r, RTMPPacket *cp);
 bool RTMP_Serve(RTMP *r);
 
 bool RTMP_ReadPacket(RTMP * r, RTMPPacket * packet);
 bool RTMP_SendPacket(RTMP * r, RTMPPacket * packet, bool queue);
+bool RTMP_SendChunk(RTMP * r, RTMPChunk *chunk);
 bool RTMP_IsConnected(RTMP *r);
 bool RTMP_IsTimedout(RTMP *r);
 double RTMP_GetDuration(RTMP *r);
@@ -226,12 +238,5 @@ bool RTMP_FindFirstMatchingProperty(AMFObject *obj, const AVal *name,
 				      AMFObjectProperty *p);
 
 bool RTMPSockBuf_Fill(RTMPSockBuf *sb);
-
-#ifdef CRYPTO
-/* hashswf.c */
-#define HASHLEN	32
-
-int RTMP_HashSWF(const char *url, unsigned int *size, unsigned char *hash, int ask);
-#endif
 
 #endif

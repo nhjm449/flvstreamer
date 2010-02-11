@@ -1,4 +1,4 @@
-/*  FLVStreamer
+/*  flvstreamer
  *  Copyright (C) 2008-2009 Andrej Stepanchuk
  *  Copyright (C) 2009 Howard Chu
  *
@@ -13,7 +13,7 @@
  *  GNU General Public License for more details.
  *
  *  You should have received a copy of the GNU General Public License
- *  along with FLVStreamer; see the file COPYING.  If not, write to
+ *  along with flvstreamer; see the file COPYING.  If not, write to
  *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *  http://www.gnu.org/copyleft/gpl.html
  *
@@ -29,11 +29,16 @@
 
 #define MAX_PRINT_LEN	2048
 
-int debuglevel = LOGERROR;
+AMF_LogLevel debuglevel = LOGERROR;
 
 static int neednl;
 
 static FILE *fmsg;
+
+static const char *levels[] = {
+  "CRIT", "ERROR", "WARNING", "INFO",
+  "DEBUG", "DEBUG2"
+};
 
 void LogSetOutput(FILE *file)
 {
@@ -43,9 +48,10 @@ void LogSetOutput(FILE *file)
 void LogPrintf(const char *format, ...)
 {
 	char str[MAX_PRINT_LEN]="";
+        int len;
 	va_list args;
 	va_start(args, format);
-	vsnprintf(str, MAX_PRINT_LEN-1, format, args);
+	len = vsnprintf(str, MAX_PRINT_LEN-1, format, args);
 	va_end(args);
 
 	if ( debuglevel==LOGCRIT )
@@ -58,8 +64,11 @@ void LogPrintf(const char *format, ...)
 		neednl = 0;
 	}
 
+        if (len > MAX_PRINT_LEN-1)
+          len = MAX_PRINT_LEN-1;
 	fprintf(fmsg, "%s", str);
-	fflush(fmsg);
+        if (str[len-1] == '\n')
+	  fflush(fmsg);
 }
 
 void LogStatus(const char *format, ...)
@@ -99,10 +108,10 @@ void Log(int level, const char *format, ...)
 			putc('\n', fmsg);
 			neednl = 0;
 		}
-		fprintf(fmsg, "\r%s: %s\n", level==LOGDEBUG?"DEBUG":(level==LOGERROR?
-"ERROR":(level==LOGWARNING?"WARNING":(level==LOGCRIT?"CRIT":"INFO"))), str);
-
+		fprintf(fmsg, "%s: %s\n", levels[level], str);
+#ifdef _DEBUG
 		fflush(fmsg);
+#endif
 	}
 }
 

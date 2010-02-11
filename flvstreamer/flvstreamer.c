@@ -1,4 +1,4 @@
-/*  FLVStreamer
+/*  flvstreamer
  *  Copyright (C) 2009 Andrej Stepanchuk
  *  Copyright (C) 2009 Howard Chu
  *
@@ -13,7 +13,7 @@
  *  GNU General Public License for more details.
  *
  *  You should have received a copy of the GNU General Public License
- *  along with FLVStreamer; see the file COPYING.  If not, write to
+ *  along with flvstreamer; see the file COPYING.  If not, write to
  *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *  http://www.gnu.org/copyleft/gpl.html
  *
@@ -42,8 +42,6 @@
 #else
 #define	SET_BINMODE(f)
 #endif
-
-#define FLVSTREAMER_VERSION	"v2.1a"
 
 #define RD_SUCCESS		0
 #define RD_FAILED		1
@@ -551,8 +549,8 @@ OpenResumeFile(const char *flvFile,	// file name [in]
 	       uint32_t * nMetaHeaderSize,	// length of metaHeader [out]
 	       double *duration)	// duration of the stream in ms [out]
 {
-  const size_t bufferSize = 1024;
-  char buffer[bufferSize];
+  size_t bufferSize = 0;
+  char hbuf[16], *buffer = NULL;
 
   *nMetaHeaderSize = 0;
   *size = 0;
@@ -571,34 +569,34 @@ OpenResumeFile(const char *flvFile,	// file name [in]
       uint32_t prevTagSize = 0;
 
       // check we've got a valid FLV file to continue!
-      if (fread(buffer, 1, 13, *file) != 13)
+      if (fread(hbuf, 1, 13, *file) != 13)
 	{
 	  Log(LOGERROR, "Couldn't read FLV file header!");
 	  return RD_FAILED;
 	}
-      if (buffer[0] != 'F' || buffer[1] != 'L' || buffer[2] != 'V'
-	  || buffer[3] != 0x01)
+      if (hbuf[0] != 'F' || hbuf[1] != 'L' || hbuf[2] != 'V'
+	  || hbuf[3] != 0x01)
 	{
-	  Log(LOGERROR, "Inavlid FLV file!");
+	  Log(LOGERROR, "Invalid FLV file!");
 	  return RD_FAILED;
 	}
 
-      if ((buffer[4] & 0x05) == 0)
+      if ((hbuf[4] & 0x05) == 0)
 	{
 	  Log(LOGERROR,
 	      "FLV file contains neither video nor audio, aborting!");
 	  return RD_FAILED;
 	}
 
-      uint32_t dataOffset = AMF_DecodeInt32(buffer + 5);
+      uint32_t dataOffset = AMF_DecodeInt32(hbuf + 5);
       fseek(*file, dataOffset, SEEK_SET);
 
-      if (fread(buffer, 1, 4, *file) != 4)
+      if (fread(hbuf, 1, 4, *file) != 4)
 	{
 	  Log(LOGERROR, "Invalid FLV file: missing first prevTagSize!");
 	  return RD_FAILED;
 	}
-      prevTagSize = AMF_DecodeInt32(buffer);
+      prevTagSize = AMF_DecodeInt32(hbuf);
       if (prevTagSize != 0)
 	{
 	  Log(LOGWARNING,
@@ -613,18 +611,22 @@ OpenResumeFile(const char *flvFile,	// file name [in]
       while (pos < *size - 4 && !bFoundMetaHeader)
 	{
 	  fseeko(*file, pos, SEEK_SET);
-	  if (fread(buffer, 1, 4, *file) != 4)
+	  if (fread(hbuf, 1, 4, *file) != 4)
 	    break;
 
-	  uint32_t dataSize = AMF_DecodeInt24(buffer + 1);
+	  uint32_t dataSize = AMF_DecodeInt24(hbuf + 1);
 
-	  if (buffer[0] == 0x12)
+	  if (hbuf[0] == 0x12)
 	    {
 	      if (dataSize > bufferSize)
 		{
-		  Log(LOGERROR, "%s: dataSize (%d) > bufferSize (%d)",
-		      __FUNCTION__, dataSize, bufferSize);
-		  return RD_FAILED;
+                  /* round up to next page boundary */
+                  bufferSize = dataSize + 4095;
+		  bufferSize ^= (bufferSize & 4095);
+		  free(buffer);
+                  buffer = malloc(bufferSize);
+                  if (!buffer)
+		    return RD_FAILED;
 		}
 
 	      fseeko(*file, pos + 11, SEEK_SET);
@@ -671,6 +673,7 @@ OpenResumeFile(const char *flvFile,	// file name [in]
 	  pos += (dataSize + 11 + 4);
 	}
 
+      free(buffer);
       if (!bFoundMetaHeader)
 	Log(LOGWARNING, "Couldn't locate meta data!");
     }
@@ -828,7 +831,7 @@ GetLastKeyframe(FILE * file,	// output file [in]
      uint32_t timestamp = RTMP_LIB::AMF_DecodeInt24(buffer);
      timestamp |= (buffer[3]<<24);
 
-     Log(LOGDEBUG, "Previuos timestamp: %d ms", timestamp);
+     Log(LOGDEBUG, "Previous timestamp: %d ms", timestamp);
    */
 
   if (*dSeek != 0)
@@ -1031,6 +1034,8 @@ Download(RTMP * rtmp,		// connected RTMP object
       //Log(LOGDEBUG, "Writing data type: %02X", dataType);
       fseek(file, 4, SEEK_SET);
       fwrite(&dataType, sizeof(unsigned char), 1, file);
+      /* resume uses ftell to see where we left off */
+      fseek(file, 0, SEEK_END);
     }
 
   if (nRead == -3)
@@ -1046,6 +1051,97 @@ Download(RTMP * rtmp,		// connected RTMP object
 }
 
 #define STR2AVAL(av,str)	av.av_val = str; av.av_len = strlen(av.av_val)
+
+int
+parseAMF(AMFObject *obj, const char *arg, int *depth)
+{
+  AMFObjectProperty prop = {{0,0}};
+  int i;
+  char *p;
+
+  if (arg[1] == ':')
+    {
+      p = (char *)arg+2;
+      switch(arg[0])
+        {
+        case 'B':
+          prop.p_type = AMF_BOOLEAN;
+          prop.p_vu.p_number = atoi(p);
+          break;
+        case 'S':
+          prop.p_type = AMF_STRING;
+          STR2AVAL(prop.p_vu.p_aval,p);
+          break;
+        case 'N':
+          prop.p_type = AMF_NUMBER;
+          prop.p_vu.p_number = strtod(p, NULL);
+          break;
+        case 'Z':
+          prop.p_type = AMF_NULL;
+          break;
+        case 'O':
+          i = atoi(p);
+          if (i)
+            {
+              prop.p_type = AMF_OBJECT;
+            }
+          else
+            {
+              (*depth)--;
+              return 0;
+            }
+          break;
+        default:
+          return -1;
+        }
+    }
+  else if (arg[2] == ':' && arg[0] == 'N')
+    {
+      p = strchr(arg+3, ':');
+      if (!p || !*depth)
+        return -1;
+      prop.p_name.av_val = (char *)arg+3;
+      prop.p_name.av_len = p - (arg+3);
+
+      p++;
+      switch(arg[1])
+        {
+        case 'B':
+          prop.p_type = AMF_BOOLEAN;
+          prop.p_vu.p_number = atoi(p);
+          break;
+        case 'S':
+          prop.p_type = AMF_STRING;
+          STR2AVAL(prop.p_vu.p_aval,p);
+          break;
+        case 'N':
+          prop.p_type = AMF_NUMBER;
+          prop.p_vu.p_number = strtod(p, NULL);
+          break;
+        case 'O':
+          prop.p_type = AMF_OBJECT;
+          break;
+        default:
+          return -1;
+        }
+    }
+  else
+    return -1;
+
+  if (*depth)
+    {
+      AMFObject *o2;
+      for (i=0; i<*depth; i++)
+        {
+          o2 = &obj->o_props[obj->o_num-1].p_vu.p_object;
+          obj = o2;
+        }
+    }
+  AMF_AddProp(obj, &prop);
+  if (prop.p_type == AMF_OBJECT)
+    (*depth)++;
+  return 0;
+}
 
 int
 main(int argc, char **argv)
@@ -1079,6 +1175,7 @@ main(int argc, char **argv)
   AVal subscribepath = { 0, 0 };
   int port = -1;
   int protocol = RTMP_PROTOCOL_UNDEFINED;
+  int retries = 0;
   bool bLiveStream = false;	// is it a live stream? then we can't seek/resume
   bool bHashes = false;		// display byte counters not hashes by default
 
@@ -1098,6 +1195,8 @@ main(int argc, char **argv)
   AVal flashVer = { 0, 0 };
   AVal token = { 0, 0 };
   char *sockshost = 0;
+  AMFObject extras = {0};
+  int edepth = 0;
 
   char *flvFile = 0;
 
@@ -1128,9 +1227,9 @@ main(int argc, char **argv)
       index++;
     }
 
-  LogPrintf("FLVStreamer %s\n", FLVSTREAMER_VERSION);
+  LogPrintf("flvstreamer %s\n", FLVSTREAMER_VERSION);
   LogPrintf
-    ("(c) 2008-2010 Andrej Stepanchuk, Howard Chu, The Flvstreamer Team; license: GPL\n");
+    ("(c) 2010 Andrej Stepanchuk, Howard Chu, The Flvstreamer Team; license: GPL\n");
 
   if (!InitSockets())
     {
@@ -1155,6 +1254,7 @@ main(int argc, char **argv)
     {"pageUrl", 1, NULL, 'p'},
     {"app", 1, NULL, 'a'},
     {"auth", 1, NULL, 'u'},
+    {"conn", 1, NULL, 'C'},
     {"flashVer", 1, NULL, 'f'},
     {"live", 0, NULL, 'v'},
     {"flv", 1, NULL, 'o'},
@@ -1175,7 +1275,7 @@ main(int argc, char **argv)
 
   while ((opt =
 	  getopt_long(argc, argv,
-		      "hVveqzr:s:t:p:a:b:f:o:u:n:c:l:y:m:k:d:A:B:T:w:x:W:S:#",
+		      "hVveqzr:s:t:p:a:b:f:o:u:C:n:c:l:y:m:k:d:A:B:T:w:x:W:X:S:#",
 		      longopts, NULL)) != -1)
     {
       switch (opt)
@@ -1203,6 +1303,12 @@ main(int argc, char **argv)
 	  LogPrintf("--app|-a app            Name of player used\n");
 	  LogPrintf
 	    ("--auth|-u string        Authentication string to be appended to the connect string\n");
+	  LogPrintf
+	    ("--conn|-C type:data     Arbitrary AMF data to be appended to the connect string\n");
+	  LogPrintf
+	    ("                        B:boolean(0|1), S:string, N:number, O:object-flag(0|1),\n");
+	  LogPrintf
+	    ("                        Z:(null), NB:name:boolean, NS:name:string, NN:name:number\n");
 	  LogPrintf
 	    ("--flashVer|-f string    Flash version string (default: \"%s\")\n",
 	     DEFAULT_FLASH_VER);
@@ -1236,7 +1342,7 @@ main(int argc, char **argv)
 	  LogPrintf("--verbose|-V            Verbose command output.\n");
 	  LogPrintf("--debug|-z              Debug level command output.\n");
 	  LogPrintf
-	    ("If you don't pass parameters for swfUrl, pageUrl, app or auth these propertiews will not be included in the connect ");
+	    ("If you don't pass parameters for swfUrl, pageUrl, or auth these properties will not be included in the connect ");
 	  LogPrintf("packet.\n\n");
 	  return RD_SUCCESS;
 	case 'k':
@@ -1356,6 +1462,13 @@ main(int argc, char **argv)
 	case 'u':
 	  STR2AVAL(auth, optarg);
 	  break;
+        case 'C':
+          if (parseAMF(&extras, optarg, &edepth))
+            {
+              Log(LOGERROR, "Invalid AMF parameter: %s", optarg);
+              return RD_FAILED;
+            }
+          break;
 	case 'm':
 	  timeout = atoi(optarg);
 	  break;
@@ -1438,21 +1551,6 @@ main(int argc, char **argv)
       bResume = false;
     }
 
-  if (swfHash.av_len == 0 && swfSize > 0)
-    {
-      Log(LOGWARNING,
-	  "Ignoring SWF size, supply also the hash with --swfhash");
-      swfSize = 0;
-    }
-
-  if (swfHash.av_len != 0 && swfSize == 0)
-    {
-      Log(LOGWARNING,
-	  "Ignoring SWF hash, supply also the swf size  with --swfsize");
-      swfHash.av_len = 0;
-      swfHash.av_val = NULL;
-    }
-
   if (flashVer.av_len == 0)
     {
       STR2AVAL(flashVer, DEFAULT_FLASH_VER);
@@ -1490,6 +1588,11 @@ main(int argc, char **argv)
 		   &tcUrl, &swfUrl, &pageUrl, &app, &auth, &swfHash, swfSize,
 		   &flashVer, &subscribepath, dSeek, 0, bLiveStream, timeout);
 
+  /* backward compatibility, we always sent this as true before */
+  if (auth.av_len)
+    rtmp.Link.authflag = true;
+
+  rtmp.Link.extras = extras;
   rtmp.Link.token = token;
   off_t size = 0;
 
@@ -1560,7 +1663,7 @@ main(int argc, char **argv)
 	  first = 0;
 	  LogPrintf("Connecting ...\n");
 
-	  if (!RTMP_Connect(&rtmp))
+	  if (!RTMP_Connect(&rtmp, NULL))
 	    {
 	      nStatus = RD_FAILED;
 	      break;
@@ -1608,8 +1711,43 @@ main(int argc, char **argv)
 	{
 	  nInitialFrameSize = 0;
 
+          if (retries)
+            {
+	      Log(LOGERROR, "Failed to resume the stream\n\n");
+	      if (!RTMP_IsTimedout(&rtmp))
+	        nStatus = RD_FAILED;
+	      else
+	        nStatus = RD_INCOMPLETE;
+	      break;
+            }
 	  Log(LOGINFO, "Connection timed out, trying to resume.\n\n");
-	  if (!RTMP_ToggleStream(&rtmp))
+          /* Did we already try pausing, and it still didn't work? */
+          if (rtmp.m_pausing == 3)
+            {
+              /* Only one try at reconnecting... */
+              retries = 1;
+              dSeek = rtmp.m_pauseStamp;
+              if (dStopOffset > 0)
+                {
+                  dLength = dStopOffset - dSeek;
+                  if (dLength <= 0)
+                    {
+                      LogPrintf("Already Completed\n");
+		      nStatus = RD_SUCCESS;
+		      break;
+                    }
+                }
+              if (!RTMP_ReconnectStream(&rtmp, bufferTime, dSeek, dLength))
+                {
+	          Log(LOGERROR, "Failed to resume the stream\n\n");
+	          if (!RTMP_IsTimedout(&rtmp))
+		    nStatus = RD_FAILED;
+	          else
+		    nStatus = RD_INCOMPLETE;
+	          break;
+                }
+            }
+	  else if (!RTMP_ToggleStream(&rtmp))
 	    {
 	      Log(LOGERROR, "Failed to resume the stream\n\n");
 	      if (!RTMP_IsTimedout(&rtmp))

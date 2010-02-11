@@ -13,7 +13,7 @@
  *  GNU General Public License for more details.
  *
  *  You should have received a copy of the GNU General Public License
- *  along with FLVStreamer; see the file COPYING.  If not, write to
+ *  along with flvstreamer; see the file COPYING.  If not, write to
  *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *  http://www.gnu.org/copyleft/gpl.html
  *
@@ -32,8 +32,6 @@
 #include "parseurl.h"
 
 #include "thread.h"
-
-#define FLVSTREAMER_STREAMS_VERSION	"v2.1a"
 
 #define RD_SUCCESS		0
 #define RD_FAILED		1
@@ -98,14 +96,110 @@ typedef struct
   AVal flashVer;
   AVal token;
   AVal subscribepath;
+  AMFObject extras;
+  int edepth;
   uint32_t swfSize;
+  int swfAge;
+  int swfVfy;
 
   uint32_t dStartOffset;
   uint32_t dStopOffset;
   uint32_t nTimeStamp;
+
 } RTMP_REQUEST;
 
 #define STR2AVAL(av,str)	av.av_val = str; av.av_len = strlen(av.av_val)
+
+int
+parseAMF(AMFObject *obj, const char *arg, int *depth)
+{
+  AMFObjectProperty prop = {{0,0}};
+  int i;
+  char *p;
+
+  if (arg[1] == ':')
+    {
+      p = (char *)arg+2;
+      switch(arg[0])
+        {
+        case 'B':
+          prop.p_type = AMF_BOOLEAN;
+          prop.p_vu.p_number = atoi(p);
+          break;
+        case 'S':
+          prop.p_type = AMF_STRING;
+          STR2AVAL(prop.p_vu.p_aval,p);
+          break;
+        case 'N':
+          prop.p_type = AMF_NUMBER;
+          prop.p_vu.p_number = strtod(p, NULL);
+          break;
+        case 'Z':
+          prop.p_type = AMF_NULL;
+          break;
+        case 'O':
+          i = atoi(p);
+          if (i)
+            {
+              prop.p_type = AMF_OBJECT;
+            }
+          else
+            {
+              (*depth)--;
+              return 0;
+            }
+          break;
+        default:
+          return -1;
+        }
+    }
+  else if (arg[2] == ':' && arg[0] == 'N')
+    {
+      p = strchr(arg+3, ':');
+      if (!p || !*depth)
+        return -1;
+      prop.p_name.av_val = (char *)arg+3;
+      prop.p_name.av_len = p - (arg+3);
+
+      p++;
+      switch(arg[1])
+        {
+        case 'B':
+          prop.p_type = AMF_BOOLEAN;
+          prop.p_vu.p_number = atoi(p);
+          break;
+        case 'S':
+          prop.p_type = AMF_STRING;
+          STR2AVAL(prop.p_vu.p_aval,p);
+          break;
+        case 'N':
+          prop.p_type = AMF_NUMBER;
+          prop.p_vu.p_number = strtod(p, NULL);
+          break;
+        case 'O':
+          prop.p_type = AMF_OBJECT;
+          break;
+        default:
+          return -1;
+        }
+    }
+  else
+    return -1;
+
+  if (*depth)
+    {
+      AMFObject *o2;
+      for (i=0; i<*depth; i++)
+        {
+          o2 = &obj->o_props[obj->o_num-1].p_vu.p_object;
+          obj = o2;
+        }
+    }
+  AMF_AddProp(obj, &prop);
+  if (prop.p_type == AMF_OBJECT)
+    (*depth)++;
+  return 0;
+}
 
 /* this request is formed from the parameters and used to initialize a new request,
  * thus it is a default settings list. All settings can be overriden by specifying the
@@ -638,10 +732,15 @@ void processTCPrequest(STREAMING_SERVER * server,	// server socket and state (ou
   RTMP_SetupStream(&rtmp, req.protocol, req.hostname, req.rtmpport, NULL,	// sockshost
 		   &req.playpath, &req.tcUrl, &req.swfUrl, &req.pageUrl, &req.app, &req.auth, &req.swfHash, req.swfSize, &req.flashVer, &req.subscribepath, dSeek, -1,	// length
 		   req.bLiveStream, req.timeout);
+  /* backward compatibility, we always sent this as true before */
+  if (req.auth.av_len)
+    rtmp.Link.authflag = true;
+
+  rtmp.Link.extras = req.extras;
   rtmp.Link.token = req.token;
 
   LogPrintf("Connecting ... port: %d, app: %s\n", req.rtmpport, req.app);
-  if (!RTMP_Connect(&rtmp))
+  if (!RTMP_Connect(&rtmp, NULL))
     {
       LogPrintf("%s, failed to connect!\n", __FUNCTION__);
     }
@@ -974,6 +1073,9 @@ ParseOption(char opt, char *arg, RTMP_REQUEST * req)
     case 'u':
       STR2AVAL(req->auth, arg);
       break;
+    case 'C':
+      parseAMF(&req->extras, optarg, &req->edepth);
+      break;
     case 'm':
       req->timeout = atoi(arg);
       break;
@@ -1015,8 +1117,8 @@ main(int argc, char **argv)
   char *httpStreamingDevice = DEFAULT_HTTP_STREAMING_DEVICE;	// streaming device, default 0.0.0.0
   int nHttpStreamingPort = 80;	// port
 
-  LogPrintf("HTTP-RTMP Stream Server %s\n", FLVSTREAMER_STREAMS_VERSION);
-  LogPrintf("(c) 2009 Andrej Stepanchuk, Howard Chu; license: GPL\n\n");
+  LogPrintf("HTTP-RTMP Stream Server %s\n", FLVSTREAMER_VERSION);
+  LogPrintf("(c) 2010 Andrej Stepanchuk, Howard Chu; license: GPL\n\n");
 
   // init request
   memset(&defaultRTMPRequest, 0, sizeof(RTMP_REQUEST));
@@ -1028,6 +1130,7 @@ main(int argc, char **argv)
   defaultRTMPRequest.timeout = 300;	// timeout connection afte 300 seconds
   defaultRTMPRequest.bufferTime = 20 * 1000;
 
+  defaultRTMPRequest.swfAge = 30;
 
   int opt;
   struct option longopts[] = {
@@ -1042,6 +1145,7 @@ main(int argc, char **argv)
     {"pageUrl", 1, NULL, 'p'},
     {"app", 1, NULL, 'a'},
     {"auth", 1, NULL, 'u'},
+    {"conn", 1, NULL, 'C'},
     {"flashVer", 1, NULL, 'f'},
     {"live", 0, NULL, 'v'},
     //{"flv",     1, NULL, 'o'},
@@ -1070,7 +1174,7 @@ main(int argc, char **argv)
 
   while ((opt =
 	  getopt_long(argc, argv,
-		      "hvqVzr:s:t:p:a:f:u:n:c:l:y:m:d:D:A:B:T:g:w:x:W:", longopts,
+		      "hvqVzr:s:t:p:a:f:u:n:c:l:y:m:d:D:A:B:T:g:w:x:W:X:", longopts,
 		      NULL)) != -1)
     {
       switch (opt)
@@ -1096,6 +1200,12 @@ main(int argc, char **argv)
 	  LogPrintf("--app|-a app            Name of player used\n");
 	  LogPrintf
 	    ("--auth|-u string        Authentication string to be appended to the connect string\n");
+	  LogPrintf
+	    ("--conn|-C type:data     Arbitrary AMF data to be appended to the connect string\n");
+	  LogPrintf
+	    ("                        B:boolean(0|1), S:string, N:number, O:object-flag(0|1),\n");
+	  LogPrintf
+	    ("                        Z:(null), NB:name:boolean, NS:name:string, NN:name:number\n");
 	  LogPrintf
 	    ("--flashVer|-f string    Flash version string (default: \"%s\")\n",
 	     DEFAULT_FLASH_VER);

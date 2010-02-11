@@ -13,7 +13,7 @@
  *  GNU General Public License for more details.
  *
  *  You should have received a copy of the GNU General Public License
- *  along with FLVStreamer; see the file COPYING.  If not, write to
+ *  along with flvstreamer; see the file COPYING.  If not, write to
  *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *  http://www.gnu.org/copyleft/gpl.html
  *
@@ -41,8 +41,6 @@
 #ifdef linux
 #include <linux/netfilter_ipv4.h>
 #endif
-
-#define FLVSTREAMER_SERVER_VERSION	"v2.1a"
 
 #define RD_SUCCESS		0
 #define RD_FAILED		1
@@ -77,6 +75,7 @@ typedef struct
   int socket;
   int state;
   int streamID;
+  char *connect;
 
 } STREAMING_SERVER;
 
@@ -144,6 +143,7 @@ SAVC(videoFunction);
 SAVC(objectEncoding);
 SAVC(_result);
 SAVC(createStream);
+SAVC(getStreamLength);
 SAVC(play);
 SAVC(fmsVer);
 SAVC(mode);
@@ -217,7 +217,7 @@ SendConnectResult(RTMP *r, double txn)
 }
 
 static bool
-SendCreateStreamResult(RTMP *r, double txn, double ID)
+SendResultNumber(RTMP *r, double txn, double ID)
 {
   RTMPPacket packet;
   char pbuf[256], *pend = pbuf+sizeof(pbuf);
@@ -241,11 +241,56 @@ SendCreateStreamResult(RTMP *r, double txn, double ID)
   return RTMP_SendPacket(r, &packet, false);
 }
 
+static void
+dumpAMF(AMFObject *obj)
+{
+   int i;
+   const char opt[] = "NBSO Z";
+
+   for (i=0; i < obj->o_num; i++)
+     {
+       AMFObjectProperty *p = &obj->o_props[i];
+       printf(" -C ");
+       if (p->p_name.av_val)
+         printf("N");
+       printf("%c:", opt[p->p_type]);
+       if (p->p_name.av_val)
+         printf("%.*s:", p->p_name.av_len, p->p_name.av_val);
+       switch(p->p_type)
+         {
+         case AMF_BOOLEAN:
+           printf("%d", p->p_vu.p_number != 0);
+           break;
+         case AMF_STRING:
+           printf("%.*s", p->p_vu.p_aval.av_len, p->p_vu.p_aval.av_val);
+           break;
+         case AMF_NUMBER:
+           printf("%f", p->p_vu.p_number);
+           break;
+         case AMF_OBJECT:
+           printf("1");
+           dumpAMF(&p->p_vu.p_object);
+           printf(" -C O:0");
+           break;
+         case AMF_NULL:
+           break;
+         default:
+           printf("<type %d>", p->p_type);
+         }
+    }
+}
+
 // Returns 0 for OK/Failed/error, 1 for 'Stop or Complete'
 int
-ServeInvoke(STREAMING_SERVER *server, RTMP * r, const char *body, unsigned int nBodySize)
+ServeInvoke(STREAMING_SERVER *server, RTMP * r, RTMPPacket *packet, unsigned int offset)
 {
+  const char *body;
+  unsigned int nBodySize;
   int ret = 0, nRes;
+
+  body = packet->m_body + offset;
+  nBodySize = packet->m_nBodySize - offset;
+
   if (body[0] != 0x02)		// make sure it is a string method name we start with
     {
       Log(LOGWARNING, "%s, Sanity failed. no string method in invoke packet",
@@ -272,6 +317,10 @@ ServeInvoke(STREAMING_SERVER *server, RTMP * r, const char *body, unsigned int n
       AMFObject cobj;
       AVal pname, pval;
       int i;
+
+      server->connect = packet->m_body;
+      packet->m_body = NULL;
+
       AMFProp_GetObject(AMF_GetProp(&obj, NULL, 2), &cobj);
       for (i=0; i<cobj.o_num; i++)
         {
@@ -279,11 +328,7 @@ ServeInvoke(STREAMING_SERVER *server, RTMP * r, const char *body, unsigned int n
           pval.av_val = NULL;
           pval.av_len = 0;
           if (cobj.o_props[i].p_type == AMF_STRING)
-            {
-              pval = cobj.o_props[i].p_vu.p_aval;
-              if (pval.av_val)
-                pval.av_val = strdup(pval.av_val);
-            }
+            pval = cobj.o_props[i].p_vu.p_aval;
           if (AVMATCH(&pname, &av_app))
             {
               r->Link.app = pval;
@@ -321,24 +366,59 @@ ServeInvoke(STREAMING_SERVER *server, RTMP * r, const char *body, unsigned int n
             {
               r->m_fEncoding = cobj.o_props[i].p_vu.p_number;
             }
-          /* Dup'd a sting we didn't recognize? */
-          if (pval.av_val)
-            free(pval.av_val);
+        }
+      /* Still have more parameters? Copy them */
+      if (obj.o_num > 3)
+        {
+          int i = obj.o_num - 3;
+          r->Link.extras.o_num = i;
+          r->Link.extras.o_props = malloc(i*sizeof(AMFObjectProperty));
+          memcpy(r->Link.extras.o_props, obj.o_props+3, i*sizeof(AMFObjectProperty));
+          obj.o_num = 3;
         }
       SendConnectResult(r, txn);
     }
   else if (AVMATCH(&method, &av_createStream))
     {
-      SendCreateStreamResult(r, txn, ++server->streamID);
+      SendResultNumber(r, txn, ++server->streamID);
+    }
+  else if (AVMATCH(&method, &av_getStreamLength))
+    {
+      SendResultNumber(r, txn, 10.0);
     }
   else if (AVMATCH(&method, &av_play))
     {
+      RTMPPacket pc = {0};
       AMFProp_GetString(AMF_GetProp(&obj, NULL, 3), &r->Link.playpath);
-      if (r->Link.playpath.av_val)
-        r->Link.playpath.av_val = strdup(r->Link.playpath.av_val);
       r->Link.seekTime = AMFProp_GetNumber(AMF_GetProp(&obj, NULL, 4));
       if (obj.o_num > 5)
         r->Link.length = AMFProp_GetNumber(AMF_GetProp(&obj, NULL, 5));
+      if (r->Link.tcUrl.av_len)
+        {
+          printf("\nflvstreamer -r \"%s\"", r->Link.tcUrl.av_val);
+          if (r->Link.app.av_val)
+            printf(" -a \"%s\"", r->Link.app.av_val);
+          if (r->Link.flashVer.av_val)
+            printf(" -f \"%s\"", r->Link.flashVer.av_val);
+          if (r->Link.swfUrl.av_val)
+            printf(" -W \"%s\"", r->Link.swfUrl.av_val);
+          printf(" -t \"%s\"", r->Link.tcUrl.av_val);
+          if (r->Link.pageUrl.av_val)
+            printf(" -p \"%s\"", r->Link.pageUrl.av_val);
+          if (r->Link.auth.av_val)
+            printf(" -u \"%s\"", r->Link.auth.av_val);
+          if (r->Link.extras.o_num)
+            {
+              dumpAMF(&r->Link.extras);
+              AMF_Reset(&r->Link.extras);
+            }
+          printf(" -y \"%.*s\" -o output.flv\n\n",
+            r->Link.playpath.av_len, r->Link.playpath.av_val);
+          fflush(stdout);
+        }
+      pc.m_body = server->connect;
+      server->connect = NULL;
+      RTMPPacket_Free(&pc);
       ret = 1;
     }
   AMF_Reset(&obj);
@@ -411,7 +491,7 @@ ServePacket(STREAMING_SERVER *server, RTMP *r, RTMPPacket *packet)
 
 	   obj.Dump(); */
 
-	ServeInvoke(server, r, packet->m_body + 1, packet->m_nBodySize - 1);
+	ServeInvoke(server, r, packet, 1);
 	break;
       }
     case 0x12:
@@ -428,7 +508,7 @@ ServePacket(STREAMING_SERVER *server, RTMP *r, RTMPPacket *packet)
 	  packet->m_nBodySize);
       //LogHex(packet.m_body, packet.m_nBodySize);
 
-      if (ServeInvoke(server, r, packet->m_body, packet->m_nBodySize))
+      if (ServeInvoke(server, r, packet, 0))
         RTMP_Close(r);
       break;
 
@@ -513,13 +593,13 @@ cleanup:
   LogPrintf("Closing connection... ");
   RTMP_Close(&rtmp);
   /* Should probably be done by RTMP_Close() ... */
-  free(rtmp.Link.playpath.av_val);
-  free(rtmp.Link.tcUrl.av_val);
-  free(rtmp.Link.swfUrl.av_val);
-  free(rtmp.Link.pageUrl.av_val);
-  free(rtmp.Link.app.av_val);
-  free(rtmp.Link.auth.av_val);
-  free(rtmp.Link.flashVer.av_val);
+  rtmp.Link.playpath.av_val = NULL;
+  rtmp.Link.tcUrl.av_val = NULL;
+  rtmp.Link.swfUrl.av_val = NULL;
+  rtmp.Link.pageUrl.av_val = NULL;
+  rtmp.Link.app.av_val = NULL;
+  rtmp.Link.auth.av_val = NULL;
+  rtmp.Link.flashVer.av_val = NULL;
   LogPrintf("done!\n\n");
 
 quit:
@@ -573,7 +653,7 @@ STREAMING_SERVER *
 startStreaming(const char *address, int port)
 {
   struct sockaddr_in addr;
-  int sockfd;
+  int sockfd, tmp;
   STREAMING_SERVER *server;
 
   sockfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -582,6 +662,10 @@ startStreaming(const char *address, int port)
       Log(LOGERROR, "%s, couldn't create socket", __FUNCTION__);
       return 0;
     }
+
+  tmp = 1;
+  setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR,
+				(char *) &tmp, sizeof(tmp) );
 
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = inet_addr(address);	//htonl(INADDR_ANY);
@@ -656,10 +740,13 @@ main(int argc, char **argv)
   char *rtmpStreamingDevice = DEFAULT_HTTP_STREAMING_DEVICE;	// streaming device, default 0.0.0.0
   int nRtmpStreamingPort = 1935;	// port
 
-  LogPrintf("RTMP Server %s\n", FLVSTREAMER_SERVER_VERSION);
-  LogPrintf("(c) 2009 Andrej Stepanchuk, Howard Chu; license: GPL\n\n");
+  LogPrintf("RTMP Server %s\n", FLVSTREAMER_VERSION);
+  LogPrintf("(c) 2010 Andrej Stepanchuk, Howard Chu; license: GPL\n\n");
 
-  debuglevel = LOGALL;
+  debuglevel = LOGINFO;
+
+  if (argc > 1 && !strcmp(argv[1], "-z"))
+    debuglevel = LOGALL;
 
   // init request
   memset(&defaultRTMPRequest, 0, sizeof(RTMP_REQUEST));

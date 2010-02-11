@@ -1,4 +1,4 @@
-/*  FLVStreamer
+/*  flvstreamer
  *  Copyright (C) 2009 Andrej Stepanchuk
  *  Copyright (C) 2009 Howard Chu
  *
@@ -13,7 +13,7 @@
  *  GNU General Public License for more details.
  *
  *  You should have received a copy of the GNU General Public License
- *  along with FLVStreamer; see the file COPYING.  If not, write to
+ *  along with flvstreamer; see the file COPYING.  If not, write to
  *  the Free Software Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.
  *  http://www.gnu.org/copyleft/gpl.html
  *
@@ -56,7 +56,6 @@ int chr2hex(char c)
         	return c-48;
         else if(c <= 102 && c >= 97)
                 return c-97+10;
-        
         return -1;
 }
 
@@ -150,12 +149,12 @@ parsehost:
 
 	// check for sudden death
 	if(*p==0) {
-		Log(LOGWARNING, "No hostname in URL!");		
+		Log(LOGWARNING, "No hostname in URL!");
 		return 0;
 	}
 
 	int iEnd   = strlen(p);
-	int iCol   = iEnd+1; 
+	int iCol   = iEnd+1;
 	int iQues  = iEnd+1;
 	int iSlash = iEnd+1;
 
@@ -220,7 +219,7 @@ parsehost:
 
         if((temp=strstr(p, "/"))!=0)
         	iSlash2 = temp-p;
-	
+
 	if((temp=strstr(p, "?"))!=0)
 	        iQues = temp-p;
 
@@ -229,7 +228,7 @@ parsehost:
 			iSlash3 = temp-p;
 
 	//Log(LOGDEBUG, "p:%s, iEnd: %d\niSlash : %d\niSlash2: %d\niSlash3: %d", p, iEnd, iSlash, iSlash2, iSlash3);
-	
+
 	int applen = iEnd+1; // ondemand, pass all parameters as app
 	int appnamelen = 8; // ondemand length
 
@@ -245,7 +244,7 @@ parsehost:
 		appnamelen = iSlash2 < iEnd ? iSlash2 : iEnd;
         	if(iSlash3 < iEnd)
                 	appnamelen = iSlash3;
-	
+
 		applen = appnamelen;
 	}
 
@@ -254,7 +253,7 @@ parsehost:
 	(*app)[applen]=0;
 	Log(LOGDEBUG, "Parsed app     : %s", *app);
 
-	p += appnamelen; 
+	p += appnamelen;
 	iEnd -= appnamelen;
 
 	if (*p == '/') {
@@ -275,7 +274,7 @@ parsehost:
  * the playpath part of the URL with formating depending on the stream
  * type:
  *
- * mp4 streams: prepend "mp4:"
+ * mp4 streams: prepend "mp4:", remove extension
  * mp3 streams: prepend "mp3:", remove extension
  * flv streams: remove extension
  */
@@ -285,8 +284,10 @@ char *ParsePlaypath(const char *playpath) {
 
 	int addMP4 = 0;
 	int addMP3 = 0;
-	const char *temp;
+	int subExt = 0;
+	const char *temp, *q, *ext = NULL;
 	const char *ppstart = playpath;
+
 	int pplen = strlen(playpath);
 
 	if ((*ppstart == '?') &&
@@ -300,18 +301,23 @@ char *ParsePlaypath(const char *playpath) {
 		}
 	}
 
+	q = strchr(ppstart, '?');
 	if (pplen >= 4) {
-		const char *ext = &ppstart[pplen-4];
-		if ((strcmp(ext, ".f4v") == 0) ||
-		    (strcmp(ext, ".mp4") == 0)) {
+		if (q)
+			ext = q-4;
+		else
+			ext = &ppstart[pplen-4];
+		if ((strncmp(ext, ".f4v", 4) == 0) ||
+		    (strncmp(ext, ".mp4", 4) == 0)) {
 			addMP4 = 1;
+			subExt = 1;
 		// Only remove .flv from rtmp URL, not slist params
 		} else if ((ppstart == playpath) &&
-		    (strcmp(ext, ".flv") == 0)) {
-			pplen -= 4;
-		} else if (strcmp(ext, ".mp3") == 0) {
+		    (strncmp(ext, ".flv", 4) == 0)) {
+			subExt = 1;
+		} else if (strncmp(ext, ".mp3", 4) == 0) {
 			addMP3 = 1;
-			pplen -= 4;
+			subExt = 1;
 		}
 	}
 
@@ -319,7 +325,7 @@ char *ParsePlaypath(const char *playpath) {
 	if (!streamname)
 		return NULL;
 
-	char *destptr = streamname;
+	char *destptr = streamname, *p;
 	if (addMP4 && (strncmp(ppstart, "mp4:", 4) != 0)) {
 		strcpy(destptr, "mp4:");
 		destptr += 4;
@@ -328,8 +334,24 @@ char *ParsePlaypath(const char *playpath) {
 		destptr += 4;
 	}
 
-	strncpy(destptr, ppstart, pplen);
-	destptr[pplen] = '\0';
+ 	for (p=(char *)ppstart; pplen >0;) {
+		/* skip extension */
+		if (subExt && p == ext) {
+			p += 4;
+			pplen -= 4;
+		}
+		if (*p == '%') {
+			int c;
+			sscanf(p+1, "%02x", &c);
+			*destptr++ = c;
+			pplen -= 3;
+			p += 3;
+		} else {
+			*destptr++ = *p++;
+			pplen--;
+		}
+	}
+	*destptr = '\0';
 
 	return streamname;
 }
